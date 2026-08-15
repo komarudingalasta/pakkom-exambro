@@ -1,0 +1,13 @@
+CATATAN FIRESTORE RULES
+
+Saya sengaja tidak menyertakan Rules yang membuka seluruh database untuk publik.
+Versi V9 Stable masih mempertahankan login siswa model V7 (NIS/password disimpan di Firestore), sehingga Rules produksi yang benar-benar aman membutuhkan perubahan arsitektur autentikasi siswa.
+
+Gunakan Rules yang sekarang hanya untuk pengujian jika sudah sesuai project Anda. Jangan mengubah menjadi:
+allow read, write: if true;
+
+Tahap berikutnya yang direkomendasikan:
+- Siswa memakai Firebase Authentication atau custom token.
+- Password tidak disimpan plaintext di dokumen students.
+- PIN divalidasi server-side/Cloud Functions.
+- Admin write dibatasi berdasarkan admins/{uid}.

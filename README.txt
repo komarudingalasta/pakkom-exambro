@@ -1,30 +1,58 @@
-PAKKOM EXAMBRO V7 AWAL
+PAKKOM EXAMBRO V9 STABLE
 
-ALUR:
-Kelas -> Password Kelas -> Daftar/Login Siswa -> NIS + Password -> Ujian
+TUJUAN VERSI INI
+- Dibuat ulang dari nol untuk menghindari layar putih/kosong.
+- index.html memiliki layar awal sendiri sebelum app.js berjalan.
+- Jika Firebase/config/app.js gagal dimuat, pengguna mendapat pesan error yang jelas.
+- Semua file utama berada di folder yang sama agar deployment lebih sederhana.
 
-FILE:
-- Ganti index.html
-- Ganti assets/app.js
-- Ganti assets/style.css
-- PERTAHANKAN assets/config.js dari V4/V5/V6
+FILE YANG WAJIB DIUNGGAH BERSAMA
+1. index.html
+2. style.css
+3. config.js
+4. app.js
 
-KOLEKSI FIRESTORE:
+Jangan hanya mengunggah index.html.
+
+FITUR SISWA
+- Pilih kelas + password kelas
+- Daftar siswa mandiri
+- Login NIS + password
+- Sesi login tersimpan di browser
+- Melihat ujian sesuai kelas
+- Jadwal mulai/selesai
+- PIN ujian
+- Fullscreen sebelum membuka ujian bila browser mendukung
+- Pencatatan awal ke examAttempts (opsional; jika Rules mengizinkan)
+
+FITUR ADMIN
+- Login Firebase Authentication email/password
+- Dashboard jumlah kelas, siswa, ujian
+- Tambah/ubah/nonaktifkan kelas
+- Tambah siswa manual
+- Cari/filter siswa
+- Reset/nonaktifkan siswa
+- Export siswa CSV
+- Tambah/nonaktifkan/hapus ujian
+- Atur kelas peserta, jadwal, link, dan PIN
+
+STRUKTUR FIRESTORE KOMPATIBEL DENGAN V7
 classes/{kelas}
 students/{id}
 examPublic/{id}
 examSecrets/{id}
 admins/{uid}
+examAttempts/{id} (opsional)
 
-FITUR:
-- Admin mengatur password setiap kelas
-- Siswa registrasi mandiri setelah berhasil masuk kelas
-- NIS unik
-- Login siswa menggunakan NIS + password
-- Admin reset/nonaktifkan akun siswa
-- Admin kelola ujian dan link
-- Ujian dapat diarahkan ke Google Form, Quizizz, dll.
-- PIN ujian terpisah di examSecrets
+PENTING SOAL KEAMANAN
+Versi ini mempertahankan struktur V7 sehingga password kelas/siswa masih berada di Firestore. Ini dibuat agar kompatibel dengan data lama dan mudah diuji, tetapi belum ideal untuk produksi skala besar.
+Jangan gunakan Rules Firestore "allow read, write: if true".
+Untuk versi produksi, autentikasi siswa dan validasi PIN sebaiknya dipindahkan ke Firebase Authentication + backend/Cloud Functions.
 
-PENTING:
-Versi ini adalah V7 AWAL/prototipe. Password siswa dan password kelas masih berada di Firestore dan belum ideal untuk produksi. Jangan membuat Rules Firestore menjadi allow read/write publik. Tahap berikutnya sebaiknya memindahkan autentikasi ke Firebase Authentication/Cloud Functions dan menambahkan import Excel.
+JIKA LAYAR MASIH BERMASALAH
+1. Pastikan keempat file di atas berada pada folder yang sama.
+2. Buka DevTools/Console bila memakai komputer.
+3. Pastikan perangkat memiliki internet karena library Firebase dimuat dari gstatic.com.
+4. Pastikan config.js sesuai project Firebase.
+5. Pastikan domain hosting diizinkan pada Firebase Authentication bila login admin gagal.
+6. Periksa Firestore Rules bila halaman tampil tetapi data tidak bisa dibaca/ditulis.
