@@ -1,0 +1,8 @@
+{
+  "name": "PakKom Exambro",
+  "short_name": "PakKom",
+  "start_url": "./",
+  "display": "standalone",
+  "theme_color": "#123b70",
+  "background_color": "#eef3f9"
+}
