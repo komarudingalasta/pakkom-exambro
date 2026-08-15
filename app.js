@@ -58,7 +58,7 @@ async function home(){
  try{if(!u||!u.isAnonymous){if(u)await auth.signOut();await ensureAnon();}}catch(e){}
  renderHome('');
 }
-function renderHome(note){app.innerHTML='<div class="login card"><div class="hero"><span class="logo">P</span><h1>PakKom Exambro V12.2 Lite</h1><p class="muted">Portal ujian siswa</p></div>'+(note?'<div class="notice">'+esc(note)+'</div>':'')+'<div class="grid"><button class="btn" id="studentBtn">Siswa</button><button class="btn gray" id="adminBtn">Admin</button></div><div class="notice"><b>Alur:</b> pilih kelas → password kelas → login/daftar → approval admin → ujian → PIN.</div><p class="muted smalltext">Refresh tidak mengeluarkan siswa. Sesi berakhir setelah 60 menit tanpa aktivitas.</p></div>';el('studentBtn').onclick=classGate;el('adminBtn').onclick=adminLogin;}
+function renderHome(note){app.innerHTML='<div class="login card"><div class="hero"><span class="logo">P</span><h1>PakKom Exambro V12.3 Lite</h1><p class="muted">Portal ujian siswa</p></div>'+(note?'<div class="notice">'+esc(note)+'</div>':'')+'<div class="grid"><button class="btn" id="studentBtn">Siswa</button><button class="btn gray" id="adminBtn">Admin</button></div><div class="notice"><b>Alur:</b> pilih kelas → password kelas → login/daftar → approval admin → ujian → PIN.</div><p class="muted smalltext">Refresh tidak mengeluarkan siswa. Sesi berakhir setelah 60 menit tanpa aktivitas.</p></div>';el('studentBtn').onclick=classGate;el('adminBtn').onclick=adminLogin;}
 
 async function loadClasses(){
  await ensureAnon();
@@ -88,17 +88,41 @@ async function doRegister(){
 
 async function studentDashboard(){
  checkIdle();if(!state.student)return;
+ // PRIORITAS REFRESH: jika ada ujian aktif yang tersimpan, pulihkan langsung
+ // dari document examAttempts + examPublic. Tidak bergantung pada query daftar attempt.
+ var activeId=readActiveExam();
+ if(activeId){
+  try{
+   var pair=await Promise.all([
+    db.collection('examAttempts').doc(attemptId(activeId)).get(),
+    db.collection('examPublic').doc(activeId).get()
+   ]);
+   if(pair[0].exists&&pair[0].data().status==='in_progress'&&pair[1].exists){
+    var ax=Object.assign({id:pair[1].id},pair[1].data());
+    var allowed=!Array.isArray(ax.allowedClasses)||!ax.allowedClasses.length||ax.allowedClasses.indexOf(state.classId)>=0;
+    if(allowed){state.currentExam=ax;resumeExam(ax);return;}
+   }
+   // Hanya hapus penanda jika attempt memang sudah selesai/tidak valid.
+   if(pair[0].exists&&pair[0].data().status==='completed')saveActiveExam('');
+  }catch(e){
+   console.warn('restore active exam',e);
+   // Jika jaringan/Firestore sesaat gagal, jangan hapus ACTIVE_EXAM_KEY.
+   // Tampilkan dashboard hanya sebagai fallback; refresh berikutnya masih dapat memulihkan.
+  }
+ }
  try{var s=await db.collection('examPublic').where('active','==',true).get();state.exams=s.docs.map(function(d){return Object.assign({id:d.id},d.data());}).filter(function(x){return !Array.isArray(x.allowedClasses)||!x.allowedClasses.length||x.allowedClasses.indexOf(state.classId)>=0;});}catch(e){state.exams=[];}
  var attempts=await getAttemptsForStudent();
- var activeId=readActiveExam(),activeAttempt=activeId?attempts[activeId]:null,activeExam=activeId?state.exams.find(function(x){return x.id===activeId;}):null;
- if(activeAttempt&&activeAttempt.status==='in_progress'&&activeExam){state.currentExam=activeExam;resumeExam(activeExam);return;}
- if(activeId)saveActiveExam('');
+ // Fallback kedua: jika ACTIVE_EXAM_KEY ada dan query attempt berhasil, pulihkan juga.
+ if(activeId&&attempts[activeId]&&attempts[activeId].status==='in_progress'){
+  var activeExam=state.exams.find(function(x){return x.id===activeId;});
+  if(activeExam){state.currentExam=activeExam;resumeExam(activeExam);return;}
+ }
  var cards=state.exams.map(function(x){return examCard(x,attempts[x.id]);}).join('')||'<div class="empty">Belum ada ujian aktif untuk kelas ini.</div>';
  top('PakKom Exambro','<div class="wrap"><div class="card"><span class="pill">Kelas '+esc(state.classId)+'</span><h1>'+esc(state.student.name)+'</h1><p class="muted">NIS: '+esc(state.student.nis)+'</p></div><div class="card"><h2>Ujian Tersedia</h2>'+cards+'</div></div>',studentLogout,'Keluar');
  Array.prototype.forEach.call(document.querySelectorAll('.exam-start'),function(b){b.onclick=function(){examPin(b.dataset.id);};});
  Array.prototype.forEach.call(document.querySelectorAll('.exam-resume'),function(b){b.onclick=function(){var x=state.exams.find(function(a){return a.id===b.dataset.id;});if(x){state.currentExam=x;saveActiveExam(x.id);resumeExam(x);}};});
 }
-function examCard(x,attempt){var n=Date.now(),st=x.startAt&&x.startAt.toDate?x.startAt.toDate().getTime():0,en=x.endAt&&x.endAt.toDate?x.endAt.toDate().getTime():0,future=st&&n<st,past=en&&n>en;if(attempt&&attempt.status==='completed')return '<div class="exam"><div class="row"><div><h3>'+esc(x.name)+'</h3><div class="muted">'+esc(x.subject||'Ujian online')+'</div></div><span class="pill green">Selesai</span></div><div class="success">Ujian ini sudah selesai dikerjakan dan tidak dapat dibuka kembali.</div><button class="btn gray" disabled>Sudah Selesai</button></div>';if(attempt&&attempt.status==='in_progress')return '<div class="exam"><div class="row"><div><h3>'+esc(x.name)+'</h3><div class="muted">'+esc(x.subject||'Ujian online')+'</div></div><span class="pill orange">Sedang dikerjakan</span></div><button class="btn exam-resume" data-id="'+esc(x.id)+'">Lanjutkan Ujian</button></div>';var disabled=future||past;return '<div class="exam"><div class="row"><div><h3>'+esc(x.name)+'</h3><div class="muted">'+esc(x.subject||'Ujian online')+'</div></div><span class="pill '+(disabled?'orange':'green')+'">'+(future?'Belum mulai':past?'Berakhir':'Aktif')+'</span></div>'+(st?'<p class="smalltext">Mulai: '+esc(fmt(x.startAt))+'</p>':'')+(en?'<p class="smalltext">Selesai: '+esc(fmt(x.endAt))+'</p>':'')+'<button class="btn '+(disabled?'gray':'')+' exam-start" data-id="'+esc(x.id)+'" '+(disabled?'disabled':'')+'>'+(disabled?'Tidak tersedia':'Mulai Ujian')+'</button></div>';}
+function examCard(x,attempt){var n=Date.now(),st=x.startAt&&x.startAt.toDate?x.startAt.toDate().getTime():0,en=x.endAt&&x.endAt.toDate?x.endAt.toDate().getTime():0,future=st&&n<st,past=en&&n>en;if(attempt&&attempt.status==='completed')return '<div class="exam"><div class="row"><div><h3>'+esc(x.name)+'</h3><div class="muted">'+esc(x.subject||'Ujian online')+'</div></div><span class="pill orange">Sudah Ujian</span></div><div class="notice">Ujian ini sudah selesai dikerjakan dan tidak dapat dibuka kembali.</div><button class="btn orange" disabled>Sudah Ujian</button></div>';if(attempt&&attempt.status==='in_progress')return '<div class="exam"><div class="row"><div><h3>'+esc(x.name)+'</h3><div class="muted">'+esc(x.subject||'Ujian online')+'</div></div><span class="pill orange">Sedang dikerjakan</span></div><button class="btn exam-resume" data-id="'+esc(x.id)+'">Lanjutkan Ujian</button></div>';var disabled=future||past;return '<div class="exam"><div class="row"><div><h3>'+esc(x.name)+'</h3><div class="muted">'+esc(x.subject||'Ujian online')+'</div></div><span class="pill '+(disabled?'orange':'green')+'">'+(future?'Belum mulai':past?'Berakhir':'Aktif')+'</span></div>'+(st?'<p class="smalltext">Mulai: '+esc(fmt(x.startAt))+'</p>':'')+(en?'<p class="smalltext">Selesai: '+esc(fmt(x.endAt))+'</p>':'')+'<button class="btn '+(disabled?'gray':'')+' exam-start" data-id="'+esc(x.id)+'" '+(disabled?'disabled':'')+'>'+(disabled?'Tidak tersedia':'Mulai Ujian')+'</button></div>';}
 async function examPin(id){var x=state.exams.find(function(a){return a.id===id;});if(!x)return;var at=await getAttempt(id);if(at&&at.status==='completed'){alert('Ujian ini sudah selesai dikerjakan dan tidak dapat dibuka kembali.');studentDashboard();return;}if(at&&at.status==='in_progress'){state.currentExam=x;saveActiveExam(x.id);resumeExam(x);return;}state.currentExam=x;app.innerHTML='<div class="login card"><h1>PIN Ujian</h1><h2>'+esc(x.name)+'</h2><input id="pin" class="input" inputmode="numeric" type="password" placeholder="PIN"><button class="btn block" id="checkPin">Buka Ujian</button><button class="btn gray block" id="bkDash" style="margin-top:8px">Kembali</button><div id="pinMsg"></div></div>';el('checkPin').onclick=verifyPin;el('bkDash').onclick=studentDashboard;}
 async function verifyPin(){var p=el('pin').value.trim();if(!p){msg('pinMsg','PIN wajib diisi.');return;}try{var at=await getAttempt(state.currentExam.id);if(at&&at.status==='completed'){msg('pinMsg','Ujian ini sudah selesai dikerjakan dan tidak dapat dibuka kembali.');return;}var d=await db.collection('examSecrets').doc(state.currentExam.id).get();if(!d.exists){msg('pinMsg','PIN ujian belum disetel.');return;}var x=d.data(),ok=x.pinHash?(await sha256(p))===String(x.pinHash):String(x.pin||'')===String(p);if(!ok){msg('pinMsg','PIN salah.');return;}await launchExam(state.currentExam);}catch(e){msg('pinMsg','PIN tidak dapat diperiksa: '+(e.code||e.message));}}
 function embedUrl(url){var u=String(url||'');if(/docs\.google\.com\/forms/i.test(u)){if(u.indexOf('embedded=true')<0)u+=(u.indexOf('?')>=0?'&':'?')+'embedded=true';}return u;}
@@ -108,8 +132,9 @@ async function launchExam(x){
  saveActiveExam(x.id);resumeExam(x);
 }
 function resumeExam(x){
- state.currentExam=x;saveActiveExam(x.id);var u=embedUrl(x.url);app.innerHTML='<div class="top"><div class="brand"><span class="logo">P</span><b>Ujian: '+esc(x.name)+'</b></div><button class="btn green small" id="finishExam">Sudah Selesai Mengerjakan</button></div><div class="exam-shell"><div class="exam-toolbar"><span>'+esc(state.student.name)+' • '+esc(state.classId)+'</span><div class="actions"><button class="btn small" id="fullBtn">Fullscreen</button><button class="btn gray small" id="externalBtn">Buka Langsung</button></div></div><div class="notice smalltext"><b>Jangan menekan selesai sebelum jawaban sudah dikirim.</b> Jika halaman ujian tidak muncul karena layanan menolak iframe, gunakan <b>Buka Langsung</b>. Jika halaman direfresh, ujian ini akan dibuka kembali otomatis.</div><iframe class="exam-frame" src="'+esc(u)+'" allow="fullscreen" referrerpolicy="no-referrer-when-downgrade"></iframe></div>';
- el('externalBtn').onclick=function(){location.href=x.url;};el('fullBtn').onclick=function(){var target=document.documentElement;if(target.requestFullscreen)target.requestFullscreen().catch(function(){});};el('finishExam').onclick=finishCurrentExam;
+ state.currentExam=x;saveActiveExam(x.id);var u=embedUrl(x.url);
+ app.innerHTML='<div class="top"><div class="brand"><span class="logo">P</span><b>Ujian: '+esc(x.name)+'</b></div><button class="btn green small" id="finishExam">Sudah Selesai Mengerjakan</button></div><div class="exam-shell"><div class="exam-toolbar"><span>'+esc(state.student.name)+' • '+esc(state.classId)+'</span><div class="actions"><button class="btn small" id="fullBtn">Fullscreen</button></div></div><div class="notice smalltext"><b>Jangan menekan Sudah Selesai Mengerjakan sebelum jawaban benar-benar sudah dikirim.</b> Jika halaman direfresh, PakKom Exambro akan tetap mengembalikan siswa ke halaman ujian ini.</div><iframe class="exam-frame" src="'+esc(u)+'" allow="fullscreen" referrerpolicy="no-referrer-when-downgrade"></iframe></div>';
+ el('fullBtn').onclick=function(){var target=document.documentElement;if(target.requestFullscreen)target.requestFullscreen().catch(function(){});};el('finishExam').onclick=finishCurrentExam;
 }
 async function finishCurrentExam(){
  var x=state.currentExam;if(!x)return;if(!confirm('Pastikan jawaban sudah dikirim. Setelah ditandai selesai, ujian ini tidak dapat dikerjakan lagi. Lanjutkan?'))return;

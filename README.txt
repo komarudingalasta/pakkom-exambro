@@ -1,3 +1,11 @@
+PAKKOM EXAMBRO V12.3 LITE - EXAM PERSIST
+
+PERUBAHAN:
+- Refresh saat ujian tetap kembali ke halaman soal.
+- Tombol Buka Langsung dihapus.
+- Tombol selesai: Sudah Selesai Mengerjakan.
+- Setelah selesai, kartu ujian menjadi Sudah Ujian, warna oranye, dan terkunci.
+
 PAKKOM EXAMBRO V12.2 LITE — EXAM LOCK
 
 PERUBAHAN UTAMA:
