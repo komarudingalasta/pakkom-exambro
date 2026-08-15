@@ -302,13 +302,54 @@ async function syncClassesFromExistingStudents(){
  return created;
 }
 
+
+async function syncClassesFromStudents(){
+  if(!(await isAdmin())) return 0;
+  try{
+    var s = await db.collection('students').get();
+    var classIds = [...new Set(
+      s.docs.map(function(d){
+        return String((d.data().classId || '')).trim().toUpperCase();
+      }).filter(Boolean)
+    )];
+
+    var created = 0;
+    for(var i=0;i<classIds.length;i++){
+      var id = classIds[i];
+      var ref = db.collection('classes').doc(id);
+      var d = await ref.get();
+
+      if(!d.exists){
+        await ref.set({
+          name: id,
+          passwordHash: await sha256('123456'),
+          active: true,
+          createdFrom: 'student-sync',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await saveClassCredential(id, '123456');
+        created++;
+      }
+    }
+    return created;
+  }catch(e){
+    console.error('syncClassesFromStudents failed:', e);
+    throw e;
+  }
+}
+
 async function getClassCredential(id){try{var d=await db.collection('classCredentials').doc(id).get();return d.exists?String(d.data().password||''):'';}catch(e){return '';}}
 async function getStudentCredentials(){var map={};try{var s=await db.collection('studentCredentials').get();s.docs.forEach(function(d){map[d.id]=String(d.data().password||'');});}catch(e){}return map;}
 async function saveClassCredential(id,password){await db.collection('classCredentials').doc(id).set({password:String(password),updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});}
 async function saveStudentCredential(id,password){await db.collection('studentCredentials').doc(id).set({password:String(password),updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});}
 async function classesAdmin(){
  if(!(await isAdmin()))return adminLogin();
- await syncClassesFromStudents();
+ try{
+   await syncClassesFromStudents();
+ }catch(e){
+   console.error(e);
+   return pakkomAlert('Kelola Kelas gagal dibuka: '+(e && e.message ? e.message : 'gagal sinkronisasi kelas.'));
+ }
  var s=await db.collection('classes').get();
  var credSnap=await db.collection('classCredentials').get(),cred={};credSnap.docs.forEach(function(d){cred[d.id]=String(d.data().password||'');});
  var rows=s.docs.sort(function(a,b){return a.id.localeCompare(b.id);}).map(function(d){var x=d.data(),pw=cred[d.id]||'';return '<tr><td><b>'+esc(d.id)+'</b></td><td>'+esc(x.name||d.id)+'</td><td><span class="admin-password">'+(pw?esc(pw):'<span class="muted">Belum tersimpan</span>')+'</span></td><td>'+(x.active===false?'Nonaktif':'Aktif')+'</td><td><button class="btn gray small class-edit" data-id="'+esc(d.id)+'">Edit</button> <button class="btn small '+(x.active===false?'green':'orange')+' class-toggle" data-id="'+esc(d.id)+'" data-active="'+(x.active===false?'0':'1')+'">'+(x.active===false?'Aktifkan':'Nonaktifkan')+'</button></td></tr>';}).join('');
