@@ -584,3 +584,7 @@ button,input,select,textarea{max-width:100%}
 .admin-menu-grid{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))!important}.admin-menu-grid>.card{min-height:175px!important}
 .exam-warning{font-weight:500}.exam-warning b{font-weight:800}
 @media(max-width:640px){.simple-home{padding:16px}.simple-login-card{padding:22px}.branding-editor{grid-template-columns:1fr}.branding-preview{width:132px;height:132px;margin:0 auto}.bulk-bar{align-items:stretch;flex-direction:column}.bulk-bar .actions{display:grid;grid-template-columns:1fr 1fr}.top-brand-copy span{max-width:170px}}
+
+/* V15 status & security polish */
+.student-hero-actions{display:flex;align-items:flex-end;gap:10px;flex-direction:column}.password-card{max-width:620px;margin:0 auto}.password-card label{display:block;margin-top:12px}.violation-note{background:#fff1f0!important;border:1px solid #ffc9c5!important;color:#8f1d18!important}.violation-text{color:#b42318;font-weight:700}.missed-exam{opacity:.92}.result-card-note{margin-top:8px;font-size:12px}.stat-missed b{color:#667085}.stat-violation b{color:#b42318}
+@media(max-width:720px){.student-hero-actions{align-items:flex-start;width:100%}.student-hero-actions .btn{width:100%}}

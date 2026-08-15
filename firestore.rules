@@ -26,7 +26,17 @@ service cloud.firestore {
         && request.resource.data.active == false
         && request.resource.data.registrationSource == "self";
 
-      allow update, delete: if isAdmin();
+      // Admin tetap dapat mengelola seluruh data siswa.
+      allow delete: if isAdmin();
+
+      // Siswa yang sudah login di aplikasi dapat mengganti sandinya sendiri.
+      // Perubahan dari sisi siswa dibatasi hanya ke hash sandi dan timestamp.
+      // CATATAN: arsitektur Lite masih memverifikasi sandi di browser; untuk
+      // keamanan produksi yang kuat sebaiknya migrasi ke Firebase Auth/Cloud Functions.
+      allow update: if isAdmin()
+        || (request.auth != null
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['passwordHash', 'password', 'passwordUpdatedAt']));
     }
 
     // Metadata kelas dibaca oleh user terautentikasi.
