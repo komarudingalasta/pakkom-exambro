@@ -71,7 +71,7 @@ async function forceCompleteForViolation(x){
   await pakkomAlert('Anda terdeteksi keluar dari halaman ujian sebanyak 2 kali. Ujian otomatis dianggap selesai dan telah dikunci.','Ujian Dikunci');studentDashboard();
  }catch(e){examGuardActive=true;pakkomAlert('Pelanggaran terdeteksi, tetapi status ujian gagal dikunci: '+(e.code||e.message));}
 }
-function top(title,body,backFn,backText){app.innerHTML='<div class="top"><div class="brand">'+brandLogo('logo')+'<div class="top-brand-copy"><b>'+esc(title)+'</b>'+(branding.schoolName?'<span>'+esc(branding.schoolName)+'</span>':'')+'</div></div><button class="btn gray small" id="topBack">'+esc(backText||'Kembali')+'</button></div>'+body;el('topBack').onclick=backFn||home;}
+function top(title,body,backFn,backText){var view=String(title||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');document.body.dataset.view=view;app.innerHTML='<div class="top"><div class="brand">'+brandLogo('logo')+'<div class="top-brand-copy"><b>'+esc(title)+'</b>'+(branding.schoolName?'<span>'+esc(branding.schoolName)+'</span>':'')+'</div></div><button class="btn gray small" id="topBack">'+esc(backText||'Kembali')+'</button></div>'+body;el('topBack').onclick=backFn||home;}
 
 function pakkomAlert(message,title){
  return new Promise(function(resolve){

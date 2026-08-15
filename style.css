@@ -595,3 +595,211 @@ button,input,select,textarea{max-width:100%}
 .monitor-table td{vertical-align:top}.violation-log summary{cursor:pointer;font-weight:700}.violation-log>div{display:flex;flex-direction:column;gap:2px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,.08)}.violation-log>div span{font-size:12px;opacity:.72}
 .network-banner{position:fixed;left:50%;transform:translateX(-50%);bottom:20px;z-index:99999;max-width:min(720px,calc(100vw - 28px));padding:12px 16px;border-radius:14px;box-shadow:0 10px 35px rgba(0,0,0,.18);font-size:13px}.network-banner.offline{background:#fff3cd;color:#664d03;border:1px solid #ffecb5}.network-banner.online{background:#d1e7dd;color:#0f5132;border:1px solid #badbcc}
 @media(max-width:760px){.control-head{position:static}.monitor-table{min-width:900px}.network-banner{bottom:12px}}
+
+/* ======================================================================
+   V16.5 — Premium Admin UI Polish
+   Fokus: ruang, hierarki, kenyamanan desktop/tablet/mobile.
+   ====================================================================== */
+:root{
+  --ui-bg:#f4f7fb;
+  --ui-surface:#ffffff;
+  --ui-surface-2:#f8fafc;
+  --ui-line:#e5eaf1;
+  --ui-text:#182230;
+  --ui-muted:#6b778c;
+  --ui-navy:#17365d;
+  --ui-blue:#2b6fd3;
+  --ui-blue-soft:#edf4ff;
+  --ui-green:#25845d;
+  --ui-amber:#a96819;
+  --ui-red:#b94747;
+  --ui-shadow:0 8px 28px rgba(26,54,93,.07);
+  --ui-shadow-hover:0 14px 34px rgba(26,54,93,.11);
+}
+
+body{
+  background:linear-gradient(180deg,#f8fafc 0%,var(--ui-bg) 42%,#f2f6fa 100%);
+  color:var(--ui-text);
+}
+
+/* header lebih ringan dan modern */
+.top{
+  min-height:64px;
+  background:rgba(23,54,93,.97);
+  backdrop-filter:saturate(150%) blur(10px);
+  box-shadow:0 3px 18px rgba(21,48,82,.15);
+  border-bottom:1px solid rgba(255,255,255,.06);
+}
+.top .brand{gap:11px}
+.top .logo{box-shadow:none;border:1px solid rgba(255,255,255,.18)}
+.top-brand-copy b{font-size:15px;letter-spacing:.005em}
+.top-brand-copy span{opacity:.67}
+.top>.btn.gray{background:rgba(255,255,255,.11);border:1px solid rgba(255,255,255,.12)}
+.top>.btn.gray:hover{background:rgba(255,255,255,.17)}
+
+.wrap{width:min(1240px,calc(100% - 38px));padding:28px 0 46px}
+.card{
+  border:1px solid var(--ui-line);
+  border-radius:20px;
+  box-shadow:var(--ui-shadow);
+  padding:22px;
+  background:rgba(255,255,255,.98);
+}
+.card h2{font-size:20px;margin-bottom:14px}
+.card h3{font-size:15px;color:#334155;letter-spacing:.01em}
+.muted{color:var(--ui-muted)}
+
+/* tombol: primary tetap tegas, aksi sekunder lebih tenang */
+.btn{background:var(--ui-blue);border-radius:10px;font-weight:700;box-shadow:none}
+.btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 7px 16px rgba(43,111,211,.14);filter:none}
+.btn.gray{background:#eef2f6;color:#445064;border:1px solid #dfe6ee}
+.btn.gray:hover:not(:disabled){background:#e8edf3;box-shadow:none}
+.btn.green{background:var(--ui-green)}
+.btn.orange{background:#f7efe5;color:#8b5718;border:1px solid #ead8be}
+.btn.orange:hover:not(:disabled){background:#f2e7d8;box-shadow:none}
+.btn.red{background:#fff0f0;color:#a13e3e;border:1px solid #f1d2d2}
+.btn.red:hover:not(:disabled){background:#fbe7e7;box-shadow:none}
+.btn.small{min-height:34px;padding:7px 10px;font-size:12px}
+.actions{gap:6px}
+.actions>.btn{min-width:auto}
+
+.input,select,textarea{
+  border-color:#d8e0ea;
+  background:#fbfcfe;
+  border-radius:10px;
+  min-height:44px;
+  margin-bottom:12px;
+}
+.input:focus,select:focus,textarea:focus{
+  background:#fff;
+  border-color:#8bb3eb;
+  box-shadow:0 0 0 3px rgba(43,111,211,.09);
+}
+label{color:#3f4b5f;font-size:13px}
+
+/* dashboard admin: kartu lebih ringkas, tidak terasa penuh */
+body[data-view*="admin"] .admin-menu-grid{
+  grid-template-columns:repeat(3,minmax(0,1fr))!important;
+  gap:14px;
+}
+body[data-view*="admin"] .admin-menu-grid>.card{
+  min-height:148px!important;
+  padding:19px;
+  border-radius:17px;
+  box-shadow:0 4px 18px rgba(26,54,93,.055);
+  position:relative;
+  overflow:hidden;
+}
+body[data-view*="admin"] .admin-menu-grid>.card:before{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#b8c6d8;
+}
+body[data-view*="admin"] .admin-menu-grid>.card:nth-child(1):before{background:#4889df}
+body[data-view*="admin"] .admin-menu-grid>.card:nth-child(2):before{background:#6a82c3}
+body[data-view*="admin"] .admin-menu-grid>.card:nth-child(3):before{background:#7267b4}
+body[data-view*="admin"] .admin-menu-grid>.card:nth-child(4):before{background:#2f926c}
+body[data-view*="admin"] .admin-menu-grid>.card:nth-child(5):before{background:#c28a39}
+body[data-view*="admin"] .admin-menu-grid>.card:nth-child(6):before{background:#7b8797}
+body[data-view*="admin"] .admin-menu-grid>.card h2{font-size:28px!important;margin:6px 0 14px!important;color:var(--ui-navy)!important}
+body[data-view*="admin"] .admin-menu-grid>.card p{font-size:13px;margin:5px 0 14px;line-height:1.45}
+body[data-view*="admin"] .admin-menu-grid>.card .btn{width:auto!important;align-self:flex-start!important;min-height:38px;padding:9px 12px}
+
+/* halaman kelas: form kecil di kiri, daftar dominan di kanan */
+body[data-view="kelola-kelas"] .wrap{
+  display:grid;grid-template-columns:minmax(280px,.7fr) minmax(0,1.6fr);gap:16px;align-items:start;
+}
+body[data-view="kelola-kelas"] .wrap>.card{margin:0}
+body[data-view="kelola-kelas"] .wrap>.card:first-child{position:sticky;top:84px}
+body[data-view="kelola-kelas"] .wrap>.card:first-child .grid{grid-template-columns:1fr;gap:0}
+body[data-view="kelola-kelas"] .wrap>.card:first-child .btn{width:100%}
+
+/* siswa: tambah manual + upload berdampingan, daftar di bawah */
+body[data-view="kelola-siswa"] .wrap{
+  display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;
+}
+body[data-view="kelola-siswa"] .wrap>.card{margin:0}
+body[data-view="kelola-siswa"] .wrap>.card:nth-child(3){grid-column:1/-1;margin-top:2px}
+body[data-view="kelola-siswa"] .wrap>.card:first-child .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}
+body[data-view="kelola-siswa"] .bulk-bar{background:#f7f9fc;border-color:#e1e7ef;padding:9px 11px}
+body[data-view="kelola-siswa"] #studentTable>.muted{font-size:12px;margin:10px 2px}
+
+/* ujian: editor dan daftar dua kolom di desktop */
+body[data-view="kelola-ujian"] .wrap{
+  display:grid;grid-template-columns:minmax(420px,.86fr) minmax(0,1.14fr);gap:16px;align-items:start;
+}
+body[data-view="kelola-ujian"] .wrap>.card{margin:0}
+body[data-view="kelola-ujian"] .wrap>.card:first-child{position:sticky;top:84px;max-height:calc(100vh - 104px);overflow:auto}
+body[data-view="kelola-ujian"] .form-section{padding:15px;margin:10px 0;border-radius:14px;background:#fafbfd}
+body[data-view="kelola-ujian"] .form-section-title{font-size:14px;margin-bottom:12px}
+body[data-view="kelola-ujian"] .form-num{width:27px;height:27px;flex-basis:27px}
+body[data-view="kelola-ujian"] .field-help{min-height:0}
+body[data-view="kelola-ujian"] .exam-card-modern{padding:15px;border-radius:15px}
+
+/* tabel admin: lebih lega, header sticky, hover lembut */
+body[data-view^="kelola-"] .table-wrap,
+body[data-view*="hasil"] .table-wrap,
+body[data-view*="control"] .table-wrap{
+  border-color:#e1e7ef;border-radius:14px;box-shadow:none;
+}
+body[data-view^="kelola-"] table,
+body[data-view*="hasil"] table,
+body[data-view*="control"] table{width:100%;border-collapse:separate;border-spacing:0}
+body[data-view^="kelola-"] th,
+body[data-view*="hasil"] th,
+body[data-view*="control"] th{
+  position:sticky;top:0;z-index:2;background:#f6f8fb;color:#586579;font-size:11px;text-transform:uppercase;letter-spacing:.035em;padding:11px 10px;border-bottom:1px solid #e1e7ef;white-space:nowrap;
+}
+body[data-view^="kelola-"] td,
+body[data-view*="hasil"] td,
+body[data-view*="control"] td{
+  padding:11px 10px;border-bottom:1px solid #edf1f5;font-size:13px;vertical-align:middle;
+}
+body[data-view^="kelola-"] tr:last-child td,
+body[data-view*="hasil"] tr:last-child td,
+body[data-view*="control"] tr:last-child td{border-bottom:0}
+body[data-view^="kelola-"] tbody tr:hover,
+body[data-view*="hasil"] tbody tr:hover,
+body[data-view*="control"] tbody tr:hover{background:#fafcff}
+.admin-password{display:inline-flex;padding:5px 8px;border-radius:8px;background:#f1f5f9;color:#334155;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+
+/* notifikasi lebih tipis */
+.notice,.error,.success,.info{border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.5}
+.notice{background:#fffaf0;border:1px solid #f1e4c8;color:#71551e}
+.info{background:#f2f7fd;border:1px solid #dce9f7;color:#3b5f86}
+.success{background:#f0f8f4;border:1px solid #d7ebdf;color:#286747}
+.error{background:#fff4f4;border:1px solid #f1d9d9;color:#9b3939}
+.pill{font-size:11px;padding:5px 8px}
+
+/* modal */
+.modal-backdrop{background:rgba(17,30,47,.50);backdrop-filter:blur(3px)}
+.modal-card{border-radius:18px;border:1px solid rgba(255,255,255,.7);box-shadow:0 24px 70px rgba(17,30,47,.22)}
+.modal-title{font-size:20px;color:var(--ui-navy)}
+.modal-message{font-size:14px;color:#536174}
+
+/* responsive */
+@media(max-width:1020px){
+  body[data-view*="admin"] .admin-menu-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  body[data-view="kelola-ujian"] .wrap{grid-template-columns:1fr}
+  body[data-view="kelola-ujian"] .wrap>.card:first-child{position:static;max-height:none;overflow:visible}
+}
+@media(max-width:820px){
+  .wrap{width:min(100% - 24px,1240px);padding:18px 0 34px}
+  body[data-view="kelola-kelas"] .wrap,
+  body[data-view="kelola-siswa"] .wrap{grid-template-columns:1fr}
+  body[data-view="kelola-kelas"] .wrap>.card:first-child{position:static}
+  body[data-view="kelola-siswa"] .wrap>.card:nth-child(3){grid-column:auto}
+}
+@media(max-width:560px){
+  .top{min-height:58px;padding:9px 11px}
+  .top .logo{width:36px;height:36px;flex-basis:36px;border-radius:10px}
+  .top-brand-copy b{font-size:14px}
+  .top>.btn.small{min-height:34px;padding:7px 9px}
+  .wrap{width:min(100% - 18px,1240px);padding:12px 0 26px}
+  .card{padding:16px;border-radius:16px;margin-bottom:12px}
+  body[data-view*="admin"] .admin-menu-grid{grid-template-columns:1fr!important;gap:10px}
+  body[data-view*="admin"] .admin-menu-grid>.card{min-height:128px!important;padding:16px}
+  body[data-view="kelola-siswa"] .wrap>.card:first-child .grid{grid-template-columns:1fr}
+  body[data-view="kelola-siswa"] .bulk-bar .actions{grid-template-columns:1fr 1fr}
+  .table-wrap{border-radius:11px}
+  body[data-view^="kelola-"] td{padding:9px 8px}
+  .actions>.btn{flex:0 0 auto}
+}
