@@ -1,17 +1,23 @@
-PAKKOM EXAMBRO V13 LITE
+PAKKOM EXAMBRO V14 — SIMPLE LOGIN & EXAM GUARD
 
-FOKUS V13:
-- Dashboard siswa profesional dengan ringkasan ujian hari ini, belum selesai, dan total sudah ujian.
-- Halaman verifikasi PIN yang lebih rapi.
-- Halaman Persiapan Ujian sebelum attempt dibuat.
-- Attempt berubah menjadi in_progress hanya setelah siswa menekan Mulai Ujian Sekarang.
-- Timer ujian mengikuti endAt di Firestore, sehingga refresh tidak mereset waktu.
-- Refresh saat ujian tetap kembali ke halaman soal.
-- Status Sudah Ujian tetap terkunci dan dapat diaktifkan ulang admin seperti V12.7.
-- Fitur admin V12.7 dipertahankan.
+Perubahan utama:
+- Halaman awal simpel, satu login untuk admin/siswa. Email => admin, NIS => siswa.
+- Siswa baru tetap dapat Daftar Siswa Baru melalui verifikasi kelas.
+- Identitas aplikasi, identitas sekolah, dan logo dapat kosong/diubah/upload oleh admin.
+- Kelola Siswa: pilih beberapa siswa, approve massal, hapus massal, dan hapus per siswa.
+- Saat ujian: pindah tab/keluar halaman memicu bunyi + peringatan. Pelanggaran kedua otomatis menandai ujian selesai.
+- Kelola Ujian: edit nama, pelajaran, link, kelas, tanggal, waktu, dan PIN; hapus ujian beserta attempt terkait.
 
-FIRESTORE RULES:
-Tidak berubah dari V12.7. Tidak perlu publish ulang jika Rules V12.7 sudah aktif.
+FIRESTORE RULES BERUBAH:
+- settings kini boleh READ untuk user yang sudah terautentikasi (termasuk anonymous), agar branding tampil pada halaman masuk.
+- WRITE settings tetap hanya admin.
 
-UPLOAD KE GITHUB:
-Ganti index.html, app.js, style.css. config.js tetap sama.
+Deploy file:
+- index.html
+- app.js
+- style.css
+- firestore.rules (WAJIB publish karena berubah)
+- config.js tetap memakai konfigurasi Firebase Anda.
+
+Catatan browser:
+Deteksi pindah tab/aplikasi memakai Page Visibility + window blur. Browser dapat memicu blur dan visibility bersamaan; V14 memakai debounce agar satu perpindahan tidak dihitung dua kali.
