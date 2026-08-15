@@ -1,5 +1,5 @@
 
-FITUR V11
+FITUR V11.1
 - Pendaftaran mandiri siswa berstatus approved=false dan harus disetujui admin.
 - Akun hasil input manual/import Excel oleh admin langsung approved=true.
 - Admin memiliki tombol Approve pada siswa yang menunggu.
