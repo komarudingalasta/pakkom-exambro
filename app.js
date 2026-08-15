@@ -52,7 +52,7 @@ async function home(){
  try{if(!u||!u.isAnonymous){if(u)await auth.signOut();await ensureAnon();}}catch(e){}
  renderHome('');
 }
-function renderHome(note){app.innerHTML='<div class="login card"><div class="hero"><span class="logo">P</span><h1>PakKom Exambro V12 Lite</h1><p class="muted">Portal ujian siswa</p></div>'+(note?'<div class="notice">'+esc(note)+'</div>':'')+'<div class="grid"><button class="btn" id="studentBtn">Siswa</button><button class="btn gray" id="adminBtn">Admin</button></div><div class="notice"><b>Alur:</b> pilih kelas → password kelas → login/daftar → approval admin → ujian → PIN.</div><p class="muted smalltext">Refresh tidak mengeluarkan siswa. Sesi berakhir setelah 60 menit tanpa aktivitas.</p></div>';el('studentBtn').onclick=classGate;el('adminBtn').onclick=adminLogin;}
+function renderHome(note){app.innerHTML='<div class="login card"><div class="hero"><span class="logo">P</span><h1>PakKom Exambro V12.1 Lite</h1><p class="muted">Portal ujian siswa</p></div>'+(note?'<div class="notice">'+esc(note)+'</div>':'')+'<div class="grid"><button class="btn" id="studentBtn">Siswa</button><button class="btn gray" id="adminBtn">Admin</button></div><div class="notice"><b>Alur:</b> pilih kelas → password kelas → login/daftar → approval admin → ujian → PIN.</div><p class="muted smalltext">Refresh tidak mengeluarkan siswa. Sesi berakhir setelah 60 menit tanpa aktivitas.</p></div>';el('studentBtn').onclick=classGate;el('adminBtn').onclick=adminLogin;}
 
 async function loadClasses(){
  await ensureAnon();
