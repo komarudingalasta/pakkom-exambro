@@ -1,0 +1,64 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == "admin"
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
+    }
+
+    match /admins/{uid} {
+      allow read: if isAdmin() || (request.auth != null && request.auth.uid == uid);
+      allow write: if false;
+    }
+
+    // V12 Lite memakai Firebase Anonymous Authentication untuk siswa.
+    // Data siswa dapat dibaca user terautentikasi agar login NIS dapat dilakukan di browser.
+    // Password siswa baru disimpan sebagai SHA-256 hash (passwordHash), bukan plaintext.
+    match /students/{studentId} {
+      allow read: if request.auth != null;
+
+      // Pendaftaran mandiri hanya boleh membuat akun pending/nonaktif.
+      allow create: if request.auth != null
+        && request.resource.data.approved == false
+        && request.resource.data.active == false
+        && request.resource.data.registrationSource == "self";
+
+      allow update, delete: if isAdmin();
+    }
+
+    // Metadata kelas dibaca oleh user terautentikasi.
+    // Kelas baru V12 Lite menggunakan passwordHash.
+    match /classes/{classId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /examPublic/{examId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // V12 Lite: PIN baru disimpan sebagai pinHash. Karena verifikasi dilakukan
+    // di browser, dokumen hash perlu dapat dibaca user terautentikasi.
+    match /examSecrets/{examId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /examAttempts/{attemptId} {
+      allow create: if request.auth != null;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
