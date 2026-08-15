@@ -1,25 +1,28 @@
-PAKKOM EXAMBRO V12.5 LITE - RESPONSIVE SCHEDULE
+PAKKOM EXAMBRO V12.6 LITE - CONSISTENT UI
 
-Perubahan utama V12.5:
-- Halaman muka didesain ulang dan responsif untuk HP, tablet, dan PC.
-- Portal Siswa dan Admin dibuat lebih jelas dan modern.
-- Halaman siswa menampilkan jadwal ujian dikelompokkan per hari/tanggal.
-- Setiap kartu ujian menampilkan jam mulai dan jam selesai.
-- Form Tambah Ujian admin dibagi menjadi 3 bagian: Informasi Ujian, Peserta & Keamanan, dan Jadwal Ujian.
-- Admin mengatur Tanggal Ujian, Jam Mulai, dan Jam Selesai secara terpisah.
-- Preview jadwal otomatis menampilkan nama hari, tanggal lengkap, serta rentang waktu.
-- Daftar ujian admin otomatis dikelompokkan berdasarkan tanggal dan diurutkan berdasarkan waktu.
-- Fitur V12.4 tetap dipertahankan: refresh tetap di soal, status Sudah Ujian terkunci, Hasil Ujian per kelas, dan Aktifkan Ulang siswa.
+Perubahan tampilan V12.6:
+- Seluruh halaman menggunakan sistem ukuran, jarak, radius, warna, dan lebar konten yang sama.
+- Halaman kelas, login, daftar mandiri, dashboard siswa, kartu ujian, halaman ujian, dashboard admin, kelola kelas, kelola siswa, kelola ujian, dan hasil ujian diselaraskan.
+- Dashboard admin menggunakan kartu dengan tinggi dan posisi tombol yang seragam.
+- Form Tambah Ujian memakai grid yang stabil pada PC/tablet dan otomatis menjadi satu kolom pada HP.
+- Kartu ujian dibuat sama tinggi pada layar lebar dan satu kolom pada layar kecil.
+- Tabel dibungkus konsisten dan tetap dapat digeser horizontal pada HP tanpa merusak layout.
+- Dialog PakKom Exambro, tombol aksi, badge status, dan form dibuat konsisten.
+- Halaman ujian tetap memaksimalkan iframe dan toolbar secara proporsional di HP/tablet/PC.
+- Cache version dinaikkan menjadi 12.6.0.
+
+FITUR V12.5 DAN SEBELUMNYA TETAP:
+- Pendaftaran mandiri menunggu approval admin.
+- Import Excel siswa.
+- Sesi bertahan saat refresh dan logout otomatis setelah 60 menit tidak aktif.
+- Refresh saat ujian kembali ke halaman soal.
+- Ujian selesai menjadi 'Sudah Ujian' dan terkunci.
+- Admin dapat melihat hasil pengerjaan per kelas dan mengaktifkan ulang akses siswa.
+- Jadwal ujian berdasarkan tanggal, jam mulai, dan jam selesai.
 
 UPLOAD KE GITHUB PAGES:
-- index.html
-- app.js
-- style.css
-- config.js
-
-FIRESTORE:
-- firestore.rules V12.4 masih kompatibel dan disertakan kembali pada paket ini.
-
-Catatan:
-- Ujian lama yang tidak memiliki startAt akan ditampilkan di kelompok "Tanpa jadwal".
-- Ujian baru V12.5 wajib mempunyai tanggal, jam mulai, dan jam selesai.
+1. Ganti index.html
+2. Ganti app.js
+3. Ganti style.css
+4. config.js boleh tetap dari versi aktif karena project Firebase sama.
+5. firestore.rules tetap kompatibel dengan V12.5/V12.4 dan disertakan dalam paket.
