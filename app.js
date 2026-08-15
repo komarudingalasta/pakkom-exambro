@@ -291,11 +291,23 @@ async function previewBrandLogo(){var f=el('brandLogoFile').files[0];if(!f)retur
 async function saveBranding(){var appName=el('brandAppName').value.trim()||'PakKom Exambro',school=el('brandSchool').value.trim(),preview=el('brandLogoFile').dataset.preview||branding.logoDataUrl;try{await db.collection('settings').doc('branding').set({appName:appName,schoolName:school,logoDataUrl:preview,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});await loadBranding();await pakkomAlert('Identitas aplikasi berhasil disimpan.');brandingAdmin();}catch(e){msg('brandMsg','Gagal menyimpan: '+(e.code||e.message));}}
 async function removeBrandLogo(){var ok=await pakkomConfirm('Hapus logo dari aplikasi?');if(!ok)return;try{await db.collection('settings').doc('branding').set({logoDataUrl:'',updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});await loadBranding();brandingAdmin();}catch(e){pakkomAlert('Logo gagal dihapus: '+(e.code||e.message));}}
 
+async function syncClassesFromExistingStudents(){
+ if(!(await isAdmin()))return 0;
+ var ss=await db.collection('students').get();
+ var ids=[...new Set(ss.docs.map(function(d){return String((d.data()||{}).classId||'').trim().toUpperCase();}).filter(Boolean))].sort();
+ var created=0;
+ for(var i=0;i<ids.length;i++){
+  try{if(await ensureClassExists(ids[i]))created++;}catch(e){console.warn('sync class '+ids[i],e);}
+ }
+ return created;
+}
+
 async function classesAdmin(){
  if(!(await isAdmin()))return adminLogin();
+ var synced=0;try{synced=await syncClassesFromExistingStudents();}catch(e){console.warn('class sync',e);}
  var s=await db.collection('classes').get();
  var rows=s.docs.sort(function(a,b){return a.id.localeCompare(b.id);}).map(function(d){var x=d.data();return '<tr><td><b>'+esc(d.id)+'</b></td><td>'+esc(x.name||d.id)+'</td><td>'+(x.active===false?'Nonaktif':'Aktif')+'</td><td><button class="btn gray small class-edit" data-id="'+esc(d.id)+'">Edit</button> <button class="btn small '+(x.active===false?'green':'orange')+' class-toggle" data-id="'+esc(d.id)+'" data-active="'+(x.active===false?'0':'1')+'">'+(x.active===false?'Aktifkan':'Nonaktifkan')+'</button></td></tr>';}).join('');
- top('Kelola Kelas','<div class="wrap"><div class="card"><h2>Tambah Kelas</h2><p class="muted">Password kelas baru minimal 6 karakter. Kelas yang otomatis dibuat dari import siswa menggunakan password awal <b>123456</b>.</p><div class="grid"><input id="cid" class="input" placeholder="Kode kelas, contoh 7A"><input id="cname" class="input" placeholder="Nama kelas (opsional)"><input id="cpass" class="input" type="password" placeholder="Password kelas"></div><button class="btn green" id="saveClass">Simpan</button></div><div class="card"><div class="table-wrap"><table class="table"><tr><th>Kode</th><th>Nama Kelas</th><th>Status</th><th>Aksi</th></tr>'+rows+'</table></div></div></div>',admin,'Admin');
+ top('Kelola Kelas','<div class="wrap">'+(synced?'<div class="notice success">'+synced+' kelas dari data siswa berhasil ditambahkan otomatis. Password awal: <b>123456</b>.</div>':'')+'<div class="card"><h2>Tambah Kelas</h2><p class="muted">Password kelas baru minimal 6 karakter. Kelas yang otomatis dibuat dari import siswa menggunakan password awal <b>123456</b>.</p><div class="grid"><input id="cid" class="input" placeholder="Kode kelas, contoh 7A"><input id="cname" class="input" placeholder="Nama kelas (opsional)"><input id="cpass" class="input" type="password" placeholder="Password kelas"></div><button class="btn green" id="saveClass">Simpan</button></div><div class="card"><div class="table-wrap"><table class="table"><tr><th>Kode</th><th>Nama Kelas</th><th>Status</th><th>Aksi</th></tr>'+rows+'</table></div></div></div>',admin,'Admin');
  el('saveClass').onclick=saveClass;document.querySelectorAll('.class-edit').forEach(function(b){b.onclick=function(){editClass(b.dataset.id);};});document.querySelectorAll('.class-toggle').forEach(function(b){b.onclick=function(){toggleClass(b.dataset.id,b.dataset.active==='1');};});
 }
 async function saveClass(){var id=el('cid').value.trim().toUpperCase(),name=el('cname').value.trim(),p=el('cpass').value;if(!id||p.length<6){alert('Kode kelas dan password minimal 6 karakter wajib.');return;}await db.collection('classes').doc(id).set({name:name||id,passwordHash:await sha256(p),password:firebase.firestore.FieldValue.delete(),demoPassword:firebase.firestore.FieldValue.delete(),active:true,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});classesAdmin();}
