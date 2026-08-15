@@ -1,6 +1,6 @@
-PAKKOM EXAMBRO V12.6 LITE - CONSISTENT UI
+PAKKOM EXAMBRO V12.7 LITE - CONSISTENT UI
 
-Perubahan tampilan V12.6:
+Perubahan tampilan V12.7:
 - Seluruh halaman menggunakan sistem ukuran, jarak, radius, warna, dan lebar konten yang sama.
 - Halaman kelas, login, daftar mandiri, dashboard siswa, kartu ujian, halaman ujian, dashboard admin, kelola kelas, kelola siswa, kelola ujian, dan hasil ujian diselaraskan.
 - Dashboard admin menggunakan kartu dengan tinggi dan posisi tombol yang seragam.
@@ -26,3 +26,12 @@ UPLOAD KE GITHUB PAGES:
 3. Ganti style.css
 4. config.js boleh tetap dari versi aktif karena project Firebase sama.
 5. firestore.rules tetap kompatibel dengan V12.5/V12.4 dan disertakan dalam paket.
+
+
+V12.7 UI POLISH:
+- Status admin sekarang membedakan Belum Ujian, Sedang Mengerjakan, dan Sudah Ujian.
+- Belum Ujian hanya berlaku jika siswa belum pernah membuat examAttempt.
+- Sedang Mengerjakan hanya berlaku jika examAttempt berstatus in_progress.
+- Sudah Ujian hanya berlaku jika examAttempt berstatus completed.
+- Hasil ujian tampil sebagai tabel di desktop dan kartu siswa di HP.
+- Polesan visual login, dashboard siswa, kartu ujian, jadwal, hasil admin, dan layar ujian.
