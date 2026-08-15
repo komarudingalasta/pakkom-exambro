@@ -1,29 +1,15 @@
-PAKKOM EXAMBRO V16 — EXAM CONTROL CENTER
+PAKKOM EXAMBRO V16.2 — CLASS ACCESS FLOW
 
-FOKUS V16
-- Dashboard monitoring ujian real-time per ujian dan kelas.
-- Status: Belum Ujian / Sedang Mengerjakan / Selesai / Tidak Ujian / Pelanggaran.
-- Waktu mulai & selesai pada monitoring admin.
-- Log pelanggaran pindah tab disimpan pada examAttempts.violationLog.
-- Admin dapat mengizinkan ujian ulang langsung dari Control Center.
-- Gangguan internet tidak dihitung sebagai pelanggaran dan muncul banner reconnect.
-- Refresh/restart tetap melanjutkan attempt in_progress yang tersimpan.
-- Sinkronisasi waktu server melalui koleksi timeSync agar status jadwal tidak hanya bergantung jam perangkat.
-- Duplikat ujian; salinan dibuat Nonaktif agar aman diedit sebelum digunakan.
-- Multi-kelas tetap didukung melalui allowedClasses (contoh: 7A,7B,7C).
-- Status admin otomatis: Draft/Nonaktif, Akan Datang, Berlangsung, Selesai, Diarsipkan.
-- Ujian dapat diarsipkan tanpa menghapus data pengerjaan.
-- Kelola siswa: pencarian/filter + bulk Approve/Aktifkan/Nonaktifkan/Hapus.
-- Ganti sandi siswa tetap tersedia.
+PERUBAHAN:
+- Import siswa otomatis membuat kelas yang belum ada.
+- Password awal kelas otomatis: 123456.
+- Tambah siswa manual juga otomatis membuat kelas jika belum ada.
+- Kelola Kelas: admin dapat mengedit nama/tampilan kelas, mengganti password, aktif/nonaktif.
+- Login siswa: NIS + sandi siswa -> password kelas -> Dashboard Siswa.
+- Kode kelas dipertahankan sebagai ID agar relasi siswa/ujian tidak terputus.
 
-PENTING
-1. Publish firestore.rules V16 karena ada aturan baru untuk timeSync dan log pelanggaran.
-2. Pertahankan config.js yang berisi konfigurasi Firebase proyek Anda.
-3. Firebase Anonymous Authentication harus aktif untuk alur siswa versi Lite.
-4. Untuk keamanan produksi penuh, PIN/login siswa idealnya dipindahkan ke server/Cloud Functions pada versi Secure berikutnya.
+FIRESTORE RULES:
+- Tidak ada perubahan izin dari V16.1.
+- Rules V16.1 tetap kompatibel karena admin sudah diizinkan create/update dokumen classes.
 
-
-V16.1 IMPORT FIX
-- Memperbaiki Firestore Rules agar admin dapat membuat siswa manual dan import Excel/CSV.
-- Memperjelas pesan error antara file gagal dibaca dan upload Firestore ditolak.
-- Wajib publish firestore.rules V16.1.
+PASSWORD DEFAULT KELAS: 123456

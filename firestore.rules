@@ -1,3 +1,4 @@
+// PakKom Exambro V16.2 — rules sama dengan V16.1; classes sudah mengizinkan admin create/update.
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
