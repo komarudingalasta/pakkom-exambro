@@ -1,17 +1,8 @@
-# PakKom Exambro V5
+PakKom Exambro V4 - Login Per Kelas
 
-Upgrade dari V4:
-- Login per kelas
-- Daftar kelas aktif dari Firestore
-- Dashboard siswa
-- Daftar ujian
-- Pembatasan kelas per ujian
-- Jadwal mulai/selesai
-- Link HTTPS Google Form/Quizizz/website
-- PIN ujian dipisahkan dari examPublic
-- Dashboard admin kelas dan ujian
+Demo UI:
+Kelas: 7A
+Password demo: 123456
 
-Catatan:
-- Akun Admin Firebase yang sudah ada tetap digunakan.
-- Password demo 7A: 123456.
-- PIN produksi idealnya diverifikasi server-side. Dengan Rules yang sekarang, examSecrets kemungkinan terkunci; jangan melonggarkan Rules hanya untuk membuat PIN terbuka.
+Firebase sudah dikonfigurasi. Admin menggunakan akun Firebase yang sudah dibuat.
+Password kelas dan PIN produksi BELUM disimpan/ditangani dari browser; verifikasi server-side perlu tahap berikutnya.
