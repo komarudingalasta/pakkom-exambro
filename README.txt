@@ -1,26 +1,23 @@
-PAKKOM EXAMBRO V15 — STATUS & SECURITY POLISH
+PAKKOM EXAMBRO V16 — EXAM CONTROL CENTER
 
-PERUBAHAN:
-- Nada peringatan diganti alarm singkat 3 pulsa.
-- Pelanggaran kedua tetap mengakhiri dan mengunci ujian.
-- Status siswa yang dikunci karena pelanggaran diberi keterangan khusus di portal siswa dan admin.
-- Jika waktu ujian sudah berakhir dan siswa tidak pernah memulai, status menjadi "Tidak Ujian".
-- Siswa dapat mengganti sandi setelah login (wajib memasukkan sandi lama dan konfirmasi sandi baru).
-- Tampilan hasil admin menambah status Tidak Ujian dan jumlah Pelanggaran.
-- Link Wayground dapat digunakan sebagai link join langsung tanpa menampilkan kode join terpisah di UI PakKom Exambro.
+FOKUS V16
+- Dashboard monitoring ujian real-time per ujian dan kelas.
+- Status: Belum Ujian / Sedang Mengerjakan / Selesai / Tidak Ujian / Pelanggaran.
+- Waktu mulai & selesai pada monitoring admin.
+- Log pelanggaran pindah tab disimpan pada examAttempts.violationLog.
+- Admin dapat mengizinkan ujian ulang langsung dari Control Center.
+- Gangguan internet tidak dihitung sebagai pelanggaran dan muncul banner reconnect.
+- Refresh/restart tetap melanjutkan attempt in_progress yang tersimpan.
+- Sinkronisasi waktu server melalui koleksi timeSync agar status jadwal tidak hanya bergantung jam perangkat.
+- Duplikat ujian; salinan dibuat Nonaktif agar aman diedit sebelum digunakan.
+- Multi-kelas tetap didukung melalui allowedClasses (contoh: 7A,7B,7C).
+- Status admin otomatis: Draft/Nonaktif, Akan Datang, Berlangsung, Selesai, Diarsipkan.
+- Ujian dapat diarsipkan tanpa menghapus data pengerjaan.
+- Kelola siswa: pencarian/filter + bulk Approve/Aktifkan/Nonaktifkan/Hapus.
+- Ganti sandi siswa tetap tersedia.
 
-WAYGROUND:
-Kode join tidak ditulis atau ditampilkan terpisah kepada siswa. Jika admin memasukkan link langsung Wayground,
-siswa hanya melihat konten/link ujian di dalam area ujian. Namun kode yang terkandung di URL tidak dapat dianggap
-rahasia mutlak terhadap pengguna yang sengaja memeriksa URL/network browser. Untuk pembatasan lebih kuat gunakan
-Wayground Classes / akun siswa.
-
-FIRESTORE RULES BERUBAH:
-Ya. V15 menambahkan izin update siswa yang sangat terbatas untuk perubahan passwordHash/password/passwordUpdatedAt.
-Arsitektur Lite masih memverifikasi hash password di browser. Untuk penggunaan produksi dengan keamanan tinggi,
-migrasi autentikasi siswa ke Firebase Authentication + Cloud Functions direkomendasikan.
-
-DEPLOY:
-- Ganti index.html, app.js, style.css
-- Pertahankan config.js sesuai project Firebase Anda
-- Publish firestore.rules V15
+PENTING
+1. Publish firestore.rules V16 karena ada aturan baru untuk timeSync dan log pelanggaran.
+2. Pertahankan config.js yang berisi konfigurasi Firebase proyek Anda.
+3. Firebase Anonymous Authentication harus aktif untuk alur siswa versi Lite.
+4. Untuk keamanan produksi penuh, PIN/login siswa idealnya dipindahkan ke server/Cloud Functions pada versi Secure berikutnya.

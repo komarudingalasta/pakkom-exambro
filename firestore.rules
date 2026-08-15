@@ -14,33 +14,25 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // V12 Lite memakai Firebase Anonymous Authentication untuk siswa.
-    // Data siswa dapat dibaca user terautentikasi agar login NIS dapat dilakukan di browser.
-    // Password siswa baru disimpan sebagai SHA-256 hash (passwordHash), bukan plaintext.
     match /students/{studentId} {
       allow read: if request.auth != null;
 
-      // Pendaftaran mandiri hanya boleh membuat akun pending/nonaktif.
       allow create: if request.auth != null
         && request.resource.data.approved == false
         && request.resource.data.active == false
         && request.resource.data.registrationSource == "self";
 
-      // Admin tetap dapat mengelola seluruh data siswa.
       allow delete: if isAdmin();
 
-      // Siswa yang sudah login di aplikasi dapat mengganti sandinya sendiri.
-      // Perubahan dari sisi siswa dibatasi hanya ke hash sandi dan timestamp.
-      // CATATAN: arsitektur Lite masih memverifikasi sandi di browser; untuk
-      // keamanan produksi yang kuat sebaiknya migrasi ke Firebase Auth/Cloud Functions.
+      // V16 Lite: siswa dapat mengganti sandi setelah login aplikasi.
+      // Arsitektur Lite belum mengikat dokumen siswa ke Firebase UID secara permanen,
+      // sehingga versi Secure/Cloud Functions tetap direkomendasikan untuk produksi penuh.
       allow update: if isAdmin()
         || (request.auth != null
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['passwordHash', 'password', 'passwordUpdatedAt']));
     }
 
-    // Metadata kelas dibaca oleh user terautentikasi.
-    // Kelas baru V12 Lite menggunakan passwordHash.
     match /classes/{classId} {
       allow read: if request.auth != null;
       allow create, update, delete: if isAdmin();
@@ -51,21 +43,27 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
-    // V12 Lite: PIN baru disimpan sebagai pinHash. Karena verifikasi dilakukan
-    // di browser, dokumen hash perlu dapat dibaca user terautentikasi.
     match /examSecrets/{examId} {
       allow read: if request.auth != null;
       allow write: if isAdmin();
     }
 
     match /settings/{settingId} {
-      // Identitas aplikasi/logo perlu dibaca di halaman masuk. User sudah anonymous-authenticated.
       allow read: if request.auth != null;
       allow write: if isAdmin();
     }
 
-    // Status pengerjaan ujian. Siswa Lite perlu membaca statusnya sendiri
-    // agar refresh dapat kembali ke ujian dan ujian selesai tetap terkunci.
+    // Sinkronisasi jam terhadap Firestore server time.
+    // Setiap user hanya dapat menulis dokumen dengan ID UID Firebase miliknya.
+    match /timeSync/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['serverAt'])
+        && request.resource.data.serverAt == request.time;
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
     match /examAttempts/{attemptId} {
       allow read: if request.auth != null;
 
@@ -76,6 +74,10 @@ service cloud.firestore {
         && (request.resource.data.status == "in_progress"
             || request.resource.data.status == "completed");
 
+      // Admin dapat mengelola/reset attempt.
+      // Siswa pemilik sesi dapat:
+      // 1) menambahkan violationCount/violationLog saat masih in_progress;
+      // 2) menyelesaikan attempt miliknya.
       allow update: if isAdmin()
         || (request.auth != null
           && resource.data.createdByAuthUid == request.auth.uid
@@ -83,7 +85,14 @@ service cloud.firestore {
           && request.resource.data.examId == resource.data.examId
           && request.resource.data.createdByAuthUid == resource.data.createdByAuthUid
           && resource.data.status == "in_progress"
-          && request.resource.data.status == "completed");
+          && (
+            (
+              request.resource.data.status == "in_progress"
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['violationCount', 'violationLog', 'updatedAt'])
+            )
+            || request.resource.data.status == "completed"
+          ));
 
       allow delete: if isAdmin();
     }
