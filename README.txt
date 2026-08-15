@@ -1,4 +1,4 @@
-PAKKOM EXAMBRO V9 STABLE
+PAKKOM EXAMBRO V10 STABLE
 
 TUJUAN VERSI INI
 - Dibuat ulang dari nol untuk menghindari layar putih/kosong.
@@ -18,7 +18,8 @@ FITUR SISWA
 - Pilih kelas + password kelas
 - Daftar siswa mandiri
 - Login NIS + password
-- Sesi login tersimpan di browser
+- Sesi login tersimpan di browser dan tetap aktif saat halaman direfresh
+- Logout otomatis setelah 60 menit tanpa aktivitas siswa
 - Melihat ujian sesuai kelas
 - Jadwal mulai/selesai
 - PIN ujian
@@ -56,3 +57,13 @@ JIKA LAYAR MASIH BERMASALAH
 4. Pastikan config.js sesuai project Firebase.
 5. Pastikan domain hosting diizinkan pada Firebase Authentication bila login admin gagal.
 6. Periksa Firestore Rules bila halaman tampil tetapi data tidak bisa dibaca/ditulis.
+
+
+FITUR V10:
+- Login siswa tetap aktif setelah refresh.
+- Login admin Firebase tetap aktif setelah refresh.
+- Siswa/admin otomatis logout setelah 60 menit tanpa aktivitas.
+- Admin dapat upload data siswa dari Excel/XLSX/XLS/CSV.
+- Header: NIS, Nama, Kelas, Password (Password opsional, default 123456).
+- NIS yang sudah ada dan duplikat dalam file dilewati.
+- Tersedia tombol Download Template Excel.
