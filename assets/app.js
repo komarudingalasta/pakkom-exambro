@@ -1,153 +1,71 @@
+// PakKom Exambro V8
+// Browser-based exam portal. Keeps V7 Firestore structure compatible.
+(function(){
+"use strict";
+const VERSION="V8";
+const SESSION_KEY="pakkom_student_session_v8";
+if(typeof firebase==="undefined") return document.getElementById("app").innerHTML='<div class="login card"><h2>Firebase belum termuat</h2></div>';
 const app=document.getElementById("app");
-firebase.initializeApp(window.FIREBASE_CONFIG);
+try{if(!firebase.apps.length) firebase.initializeApp(window.FIREBASE_CONFIG||window.firebaseConfig);}catch(e){app.innerHTML='<div class="login card"><h2>Konfigurasi Firebase belum terbaca</h2><span class="error">'+e.message+'</span></div>';return;}
 const auth=firebase.auth(),db=firebase.firestore();
-let currentClass=null,currentExams=[];
-
-const DEMO_CLASS={id:"7A",password:"123456",active:true};
+let state={classId:null,student:null,exams:[],currentExam:null},classList=[];
 const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
-const fmtDate=v=>v?.toDate?v.toDate().toLocaleString("id-ID"):v?new Date(v).toLocaleString("id-ID"):"-";
-const isHttps=u=>/^https:\/\//i.test(String(u||""));
+const safe=s=>String(s??"").replace(/'/g,"&#39;");
+const https=u=>/^https:\/\//i.test(String(u||""));
+const fmt=d=>d?.toDate?d.toDate().toLocaleString("id-ID",{dateStyle:"medium",timeStyle:"short"}):d instanceof Date?d.toLocaleString("id-ID",{dateStyle:"medium",timeStyle:"short"}):"-";
+const $=id=>document.getElementById(id);
+const toast=(msg,type="success")=>{const x=document.createElement("div");x.className=type;x.textContent=msg;app.prepend(x);setTimeout(()=>x.remove(),3500)};
+function shell(title,body,back="home()",backText="Kembali"){app.innerHTML=`<div class="top"><div class="brand"><span class="brand-badge">P</span><b>${esc(title)}</b></div><button class="btn gray small" onclick="${back}">${esc(backText)}</button></div>${body}`;}
+function clearStudentSession(){localStorage.removeItem(SESSION_KEY);state={classId:null,student:null,exams:[],currentExam:null};}
+function saveStudentSession(){if(state.student)localStorage.setItem(SESSION_KEY,JSON.stringify({studentId:state.student.id,classId:state.classId,at:Date.now()}));}
+async function restoreStudentSession(){try{const raw=localStorage.getItem(SESSION_KEY);if(!raw)return false;const s=JSON.parse(raw);if(!s.studentId||!s.classId)return false;const d=await db.collection("students").doc(s.studentId).get();if(!d.exists)return false;const x=d.data();if(x.active===false||x.classId!==s.classId)return false;state.classId=s.classId;state.student={id:d.id,...x};return true;}catch(e){console.warn(e);return false;}}
+async function home(){const restored=await restoreStudentSession();if(restored)return studentDashboard();app.innerHTML=`<div class="login card"><div class="hero"><div class="brand-badge" style="margin:auto;width:52px;height:52px;font-size:22px">P</div><h1>PakKom Exambro ${VERSION}</h1><p class="muted">Portal ujian siswa</p></div><div class="grid"><button class="btn" onclick="classGate()">Masuk sebagai Siswa</button><button class="btn gray" onclick="adminLogin()">Masuk sebagai Admin</button></div><p class="notice"><b>Alur siswa:</b> pilih kelas → password kelas → daftar/login NIS → pilih ujian → PIN ujian.</p><p class="help">Gunakan browser terbaru. Untuk mode ujian yang benar-benar mengunci perangkat diperlukan aplikasi/kiosk mode, bukan web biasa.</p></div>`;}
+async function getClasses(){try{const s=await db.collection("classes").where("active","==",true).get();classList=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.id.localeCompare(b.id,undefined,{numeric:true}));}catch(e){console.warn(e);classList=[];}}
+function classGate(){app.innerHTML=`<div class="login card"><h1>Masuk Kelas</h1><label>Kelas</label><select id="kelas"><option>Memuat...</option></select><label>Password Kelas</label><input id="kpw" class="input" type="password" autocomplete="current-password" placeholder="Password kelas"><button class="btn block" onclick="verifyClass()">Lanjut</button><button class="btn gray block" onclick="home()" style="margin-top:8px">Kembali</button><p id="km"></p></div>`;getClasses().then(()=>{$("kelas").innerHTML='<option value="">-- Pilih kelas --</option>'+classList.map(x=>`<option value="${esc(x.id)}">${esc(x.name||x.id)}</option>`).join("")});}
+async function verifyClass(){const id=$("kelas").value,p=$("kpw").value;if(!id||!p)return $("km").innerHTML='<span class="error">Pilih kelas dan masukkan password.</span>';try{const d=await db.collection("classes").doc(id).get(),x=d.data();if(x&&x.active!==false&&(String(x.password||x.demoPassword||"")===p)){state.classId=id;return studentChoice();}}catch(e){console.warn(e);}$("km").innerHTML='<span class="error">Password kelas salah atau kelas tidak aktif.</span>';}
+function studentChoice(){app.innerHTML=`<div class="login card"><h1>Kelas ${esc(state.classId)}</h1><p class="muted">Silakan daftar jika belum memiliki akun, atau login jika sudah terdaftar.</p><div class="grid"><button class="btn" onclick="loginStudent()">Login Siswa</button><button class="btn green" onclick="registerStudent()">Daftar Siswa</button></div><button class="btn gray block" onclick="classGate()" style="margin-top:10px">Ganti Kelas</button></div>`;}
+function registerStudent(){app.innerHTML=`<div class="login card"><h1>Daftar Siswa</h1><p><span class="pill">Kelas ${esc(state.classId)}</span></p><label>NIS</label><input id="rn" class="input" inputmode="numeric" autocomplete="username" placeholder="Masukkan NIS"><label>Nama Lengkap</label><input id="rname" class="input" placeholder="Nama sesuai data sekolah"><label>Password</label><input id="rpw" class="input" type="password" autocomplete="new-password" placeholder="Minimal 6 karakter"><label>Konfirmasi Password</label><input id="rcpw" class="input" type="password" autocomplete="new-password"><button class="btn green block" onclick="doRegister()">Daftar</button><button class="btn gray block" onclick="studentChoice()" style="margin-top:8px">Kembali</button><p id="rm"></p></div>`;}
+async function doRegister(){const nis=$("rn").value.trim(),name=$("rname").value.trim(),p=$("rpw").value,cp=$("rcpw").value;if(!nis||!name||!p)return $("rm").innerHTML='<span class="error">NIS, nama, dan password wajib diisi.</span>';if(p.length<6)return $("rm").innerHTML='<span class="error">Password minimal 6 karakter.</span>';if(p!==cp)return $("rm").innerHTML='<span class="error">Konfirmasi password tidak sama.</span>';try{const q=await db.collection("students").where("nis","==",nis).limit(1).get();if(!q.empty)return $("rm").innerHTML='<span class="error">NIS sudah terdaftar.</span>';const ref=await db.collection("students").add({nis,name,classId:state.classId,password:p,active:true,createdAt:firebase.firestore.FieldValue.serverTimestamp()});state.student={id:ref.id,nis,name,classId:state.classId,active:true};saveStudentSession();studentDashboard();}catch(e){$("rm").innerHTML='<span class="error">Registrasi gagal. Periksa Firestore Rules.</span>';console.error(e);}}
+function loginStudent(){app.innerHTML=`<div class="login card"><h1>Login Siswa</h1><p><span class="pill">Kelas ${esc(state.classId)}</span></p><label>NIS</label><input id="lnis" class="input" inputmode="numeric" autocomplete="username"><label>Password Siswa</label><input id="lpw" class="input" type="password" autocomplete="current-password"><button class="btn block" onclick="doStudentLogin()">Masuk</button><button class="btn gray block" onclick="studentChoice()" style="margin-top:8px">Kembali</button><p id="lm"></p></div>`;}
+async function doStudentLogin(){const nis=$("lnis").value.trim(),p=$("lpw").value;if(!nis||!p)return $("lm").innerHTML='<span class="error">NIS dan password wajib diisi.</span>';try{const q=await db.collection("students").where("nis","==",nis).where("classId","==",state.classId).where("active","==",true).limit(1).get();if(q.empty)return $("lm").innerHTML='<span class="error">NIS tidak ditemukan atau akun nonaktif.</span>';const d=q.docs[0],x=d.data();if(String(x.password)!==p)return $("lm").innerHTML='<span class="error">Password siswa salah.</span>';state.student={id:d.id,...x};saveStudentSession();studentDashboard();}catch(e){$("lm").innerHTML='<span class="error">Login gagal. Periksa koneksi atau Rules Firebase.</span>';}}
+function logoutStudent(){clearStudentSession();home();}
+async function studentDashboard(){if(!state.student)return home();let exams=[];try{const s=await db.collection("examPublic").where("active","==",true).get();exams=s.docs.map(d=>({id:d.id,...d.data()})).filter(x=>!Array.isArray(x.allowedClasses)||!x.allowedClasses.length||x.allowedClasses.includes(state.classId)).sort((a,b)=>{const aa=a.startAt?.toDate?.()?.getTime?.()||0,bb=b.startAt?.toDate?.()?.getTime?.()||0;return aa-bb;});}catch(e){console.warn(e);}state.exams=exams;shell("PakKom Exambro",`<div class="wrap"><div class="card"><div class="row"><div><span class="pill">Kelas ${esc(state.classId)}</span><h1 style="margin-bottom:4px">${esc(state.student.name)}</h1><p class="muted" style="margin-top:0">NIS: ${esc(state.student.nis)}</p></div><button class="btn red small" onclick="logoutStudent()">Keluar Akun</button></div></div><div class="card"><div class="row"><h2>Ujian Tersedia</h2><span class="pill gray">${exams.length} ujian</span></div>${exams.length?exams.map(examCard).join(""):'<div class="empty">Belum ada ujian aktif untuk kelas ini.</div>'}</div></div>`,`logoutStudent()`,`Keluar`);}
+function examStatus(x){const n=Date.now(),st=x.startAt?.toDate?x.startAt.toDate().getTime():0,en=x.endAt?.toDate?x.endAt.toDate().getTime():0;if(st&&n<st)return {key:"future",label:"Belum mulai",cls:"gray"};if(en&&n>en)return {key:"past",label:"Berakhir",cls:"red"};return {key:"active",label:"Aktif",cls:"green"};}
+function examCard(x){const s=examStatus(x);return `<div class="exam"><div class="row"><div><h3 style="margin:0 0 4px">${esc(x.name)}</h3><span class="muted">${esc(x.subject||"Ujian online")}</span></div><span class="pill ${s.cls}">${s.label}</span></div>${x.description?`<p>${esc(x.description)}</p>`:""}${x.startAt?`<p class="help">Mulai: ${esc(fmt(x.startAt))}</p>`:""}${x.endAt?`<p class="help">Selesai: ${esc(fmt(x.endAt))}</p>`:""}<button class="btn ${s.key!=="active"?"gray":""}" ${s.key!=="active"?"disabled":""} onclick="examPin('${safe(x.id)}')">${s.key==="active"?"MULAI UJIAN":"TIDAK TERSEDIA"}</button></div>`;}
+function examPin(id){const x=state.exams.find(a=>a.id===id);if(!x)return studentDashboard();state.currentExam=x;app.innerHTML=`<div class="login card"><h1>PIN Ujian</h1><h2>${esc(x.name)}</h2><p class="muted">${esc(x.subject||"")}</p><label>PIN Ujian</label><input id="epin" class="input" inputmode="numeric" autocomplete="one-time-code" placeholder="Masukkan PIN"><button class="btn block" onclick="verifyPin('${safe(id)}')">Verifikasi PIN</button><button class="btn gray block" onclick="studentDashboard()" style="margin-top:8px">Kembali</button><p id="em"></p></div>`;}
+async function verifyPin(id){const x=state.exams.find(a=>a.id===id),p=$("epin").value.trim();if(!p)return $("em").innerHTML='<span class="error">PIN wajib diisi.</span>';try{const d=await db.collection("examSecrets").doc(id).get();if(d.exists&&String(d.data().pin)===p)return examReady(x);}catch(e){console.warn(e);}if(x.demoPin&&String(x.demoPin)===p)return examReady(x);$("em").innerHTML='<span class="error">PIN salah.</span>';}
+function examReady(x){state.currentExam=x;app.innerHTML=`<div class="login card exam-ready"><span class="pill green">PIN benar</span><h1>${esc(x.name)}</h1><p>${esc(state.student.name)} — ${esc(state.student.nis)}</p><div class="notice" style="text-align:left"><b>Sebelum mulai:</b><br>1. Pastikan baterai dan internet cukup.<br>2. Jangan membuka aplikasi/tab lain selama ujian.<br>3. Tekan fullscreen bila tersedia.<br>4. Setelah menekan mulai, halaman akan diarahkan ke link ujian.</div><div class="actions" style="justify-content:center;margin-top:14px"><button class="btn gray" onclick="requestFullScreen()">Fullscreen</button><button class="btn green" onclick="launchExam()">MULAI SEKARANG</button></div><p class="help mobile-warning">Catatan: browser web tidak dapat mengunci tombol Home/Recent Apps seperti aplikasi Exambro native.</p></div>`;}
+async function requestFullScreen(){try{const el=document.documentElement;if(el.requestFullscreen)await el.requestFullscreen();else if(el.webkitRequestFullscreen)await el.webkitRequestFullscreen();}catch(e){console.warn(e)}}
+function launchExam(){const x=state.currentExam;if(!x||!https(x.url))return alert("Link ujian harus HTTPS.");const key=`pakkom_exam_${x.id}`;sessionStorage.setItem(key,JSON.stringify({startedAt:Date.now(),studentId:state.student.id,nis:state.student.nis,classId:state.classId,leaveCount:0}));try{db.collection("examAttempts").add({examId:x.id,studentId:state.student.id,nis:state.student.nis,name:state.student.name,classId:state.classId,startedAt:firebase.firestore.FieldValue.serverTimestamp(),userAgent:navigator.userAgent}).catch(()=>{});}catch(e){}location.href=x.url;}
 
-function home(){
- currentClass=null;
- app.innerHTML=`<div class="login card">
- <h1>PakKom Exambro V5</h1><p class="muted">Rumah ujian sekolah</p>
- <div class="grid"><button class="btn" onclick="classLogin()">Login Siswa</button><button class="btn gray" onclick="adminLogin()">Login Admin</button></div>
- <p class="notice"><b>V5:</b> login per kelas, daftar ujian, PIN ujian, pembatasan kelas, jadwal, dan dashboard admin.</p>
- </div>`;
-}
-function top(title,logout=true){return `<div class="top"><div class="brand">PakKom Exambro</div>${logout?'<button class="btn gray small" onclick="home()">Beranda</button>':''}</div><div class="wrap"><h1>${esc(title)}</h1>`}
-
-function classLogin(){
- app.innerHTML=`<div class="login card"><h1>Login Siswa</h1>
- <label>Kelas</label><select id="kelas"><option value="">-- Pilih kelas --</option><option>7A</option></select>
- <label>Password Kelas</label><input id="pw" class="input" type="password" autocomplete="current-password">
- <button class="btn" onclick="loginClass()">MASUK</button> <button class="btn gray" onclick="home()">Kembali</button><p id="msg"></p>
- </div>`;
- loadClassesForLogin();
-}
-async function loadClassesForLogin(){
- try{
-  const s=await db.collection("classes").where("active","==",true).get();
-  const list=s.docs.map(d=>d.id).sort();
-  const opts=[...new Set(["7A",...list])];
-  kelas.innerHTML='<option value="">-- Pilih kelas --</option>'+opts.map(x=>`<option>${esc(x)}</option>`).join("");
- }catch(e){/* demo fallback */}}
-async function loginClass(){
- const k=kelas.value,p=pw.value;
- if(!k||!p)return msg.innerHTML='<span class="error">Pilih kelas dan masukkan password.</span>';
- if(k===DEMO_CLASS.id&&p===DEMO_CLASS.password){currentClass=k;return classDashboard(k);}
- try{
-  const d=await db.collection("classes").doc(k).get(),x=d.data();
-  if(x?.active!==false&&x?.demoPassword===p){currentClass=k;return classDashboard(k);}
- }catch(e){}
- msg.innerHTML='<span class="error">Kelas atau password salah.</span>';
-}
-
-async function classDashboard(k){
- let exams=[];
- try{
-  const s=await db.collection("examPublic").where("active","==",true).get();
-  exams=s.docs.map(d=>({id:d.id,...d.data()})).filter(x=>{
-   const allowed=x.allowedClasses;
-   if(Array.isArray(allowed)&&allowed.length)return allowed.includes(k);
-   return true;
-  });
- }catch(e){}
- currentExams=exams;
- app.innerHTML=top("Dashboard Kelas "+k)+`
- <div class="card"><div class="row"><div><span class="pill">Kelas ${esc(k)}</span><p class="muted">Pilih ujian yang tersedia untuk kelas Anda.</p></div><button class="btn gray small" onclick="classLogin()">Ganti Kelas</button></div></div>
- <div class="card"><h2>Ujian Tersedia</h2>
- ${exams.length?exams.map(examCard).join(""):'<div class="empty">Belum ada ujian aktif untuk kelas ini.</div>'}</div></div>`;
-}
-function examCard(x){
- const now=Date.now(),start=x.startAt?.toDate?x.startAt.toDate().getTime():x.startAt?new Date(x.startAt).getTime():0,end=x.endAt?.toDate?x.endAt.toDate().getTime():x.endAt?new Date(x.endAt).getTime():0;
- let status="";
- if(start&&now<start)status=`<span class="pill">Mulai ${esc(fmtDate(x.startAt))}</span>`;
- if(end&&now>end)status=`<span class="pill">Berakhir</span>`;
- const can=!((start&&now<start)||(end&&now>end));
- return `<div class="exam"><div class="row"><h3>${esc(x.name)}</h3>${status}</div><p class="muted">${esc(x.subject||"Ujian online")} ${x.description?"• "+esc(x.description):""}</p>
- <button class="btn ${can?"":"gray"}" ${can?"":"disabled"} onclick="openPin('${esc(x.id)}')">${can?"MULAI UJIAN":"BELUM TERSEDIA"}</button></div>`;
-}
-async function openPin(id){
- const x=currentExams.find(a=>a.id===id);if(!x)return;
- app.innerHTML=`<div class="login card"><h1>${esc(x.name)}</h1><p class="muted">${esc(x.subject||"Ujian online")}</p>
- <label>PIN Ujian</label><input id="pin" class="input" inputmode="numeric" maxlength="12" placeholder="Masukkan PIN">
- <button class="btn" onclick="verifyPin('${esc(id)}')">MULAI UJIAN</button>
- <button class="btn gray" onclick="classDashboard('${esc(currentClass)}')">Kembali</button>
- <p class="notice">PIN diberikan oleh pengawas/admin.</p><p id="pm"></p></div>`;
-}
-async function verifyPin(id){
- const p=pin.value.trim(),x=currentExams.find(a=>a.id===id);if(!p)return pm.innerHTML='<span class="error">Masukkan PIN.</span>';
- // V5 keeps secret PIN out of examPublic. A demoPin may be used for testing only.
- if(x?.demoPin&&p===String(x.demoPin))return launchExam(x);
- try{
-  const s=await db.collection("examSecrets").doc(id).get();
-  // Only works if Firestore Rules permit this read; production should move this check server-side.
-  if(s.exists&&String(s.data().pin)===p)return launchExam(x);
- }catch(e){}
- pm.innerHTML='<span class="error">PIN salah.</span>';
-}
-function launchExam(x){
- if(!isHttps(x.url))return pm.innerHTML='<span class="error">Link ujian tidak valid. Admin harus menggunakan HTTPS.</span>';
- app.innerHTML=`<div class="login card"><h2>PIN benar</h2><p>Anda akan diarahkan ke ujian.</p><button class="btn" onclick="location.href='${esc(x.url)}'">BUKA UJIAN</button></div>`;
-}
-function adminLogin(){
- app.innerHTML=`<div class="login card"><h1>Login Admin</h1><input id="em" class="input" placeholder="Email admin" autocomplete="username"><input id="ap" class="input" type="password" placeholder="Password" autocomplete="current-password">
- <button class="btn" onclick="doAdmin()">MASUK</button> <button class="btn gray" onclick="home()">Kembali</button><p id="am"></p></div>`;
-}
-async function doAdmin(){
- try{
-  const c=await auth.signInWithEmailAndPassword(em.value.trim(),ap.value);
-  const d=await db.collection("admins").doc(c.user.uid).get();
-  if(!d.exists||d.data().role!=="admin"||d.data().active!==true){await auth.signOut();return am.innerHTML='<span class="error">Akun bukan Admin.</span>';}
-  admin();
- }catch(e){am.innerHTML='<span class="error">Login gagal.</span>';}
-}
-function admin(){
- app.innerHTML=`<div class="top"><b>PakKom Exambro — Admin</b><button class="btn gray small" onclick="auth.signOut().then(home)">Keluar</button></div>
- <div class="wrap"><h1>Dashboard Admin</h1>
- <div class="grid"><div class="card"><h3>🏫 Kelas</h3><p class="muted">Tambah dan aktif/nonaktifkan kelas.</p><button class="btn" onclick="classes()">Kelola Kelas</button></div>
- <div class="card"><h3>📝 Ujian</h3><p class="muted">Link, kelas, PIN, jadwal, dan status.</p><button class="btn" onclick="exams()">Kelola Ujian</button></div></div>
- <div class="card notice"><b>Keamanan:</b> password kelas dan PIN produksi sebaiknya diverifikasi server-side. V5 menyediakan struktur data dan UI tanpa mengekspos password kelas.</div></div>`;
-}
-async function classes(){
- let s=await db.collection("classes").get();
- app.innerHTML=`<div class="top"><b>PakKom Exambro</b><button class="btn gray small" onclick="admin()">Admin</button></div><div class="wrap"><h1>Kelola Kelas</h1>
- <div class="card"><h3>Tambah Kelas</h3><input id="cn" class="input" placeholder="Contoh: 7B"><button class="btn green" onclick="addClass()">Simpan Kelas</button></div>
- <div class="card"><table class="table"><thead><tr><th>Kelas</th><th>Status</th><th>Aksi</th></tr></thead><tbody>
- ${s.docs.sort((a,b)=>a.id.localeCompare(b.id)).map(d=>{let x=d.data();return `<tr><td><b>${esc(d.id)}</b></td><td><span class="pill">${x.active===false?"Nonaktif":"Aktif"}</span></td><td><button class="btn ${x.active===false?"green":"gray"} small" onclick="toggleClass('${esc(d.id)}',${x.active!==false})">${x.active===false?"Aktifkan":"Nonaktifkan"}</button></td></tr>`}).join("")}
- </tbody></table></div></div>`;
-}
-async function addClass(){const id=cn.value.trim().toUpperCase();if(!/^[0-9A-Z-]+$/.test(id))return alert("Nama kelas tidak valid.");await db.collection("classes").doc(id).set({name:id,active:true});classes();}
-async function toggleClass(id,active){await db.collection("classes").doc(id).update({active:!active});classes();}
-
-async function exams(){
- let s=await db.collection("examPublic").get();
- app.innerHTML=`<div class="top"><b>PakKom Exambro</b><button class="btn gray small" onclick="admin()">Admin</button></div><div class="wrap"><h1>Kelola Ujian</h1>
- <div class="card"><h3>Tambah Ujian</h3>
- <label>Nama Ujian</label><input id="en" class="input" placeholder="PAS Matematika">
- <label>Mata Pelajaran</label><input id="es" class="input" placeholder="Matematika">
- <label>Deskripsi</label><textarea id="ed" class="input" rows="2" placeholder="Keterangan singkat"></textarea>
- <label>Link Google Form / Quizizz / website</label><input id="eu" class="input" placeholder="https://...">
- <label>Kelas (pisahkan koma, kosong = semua kelas)</label><input id="ec" class="input" placeholder="7A,7B,7C">
- <label>PIN Ujian (demo / sementara)</label><input id="ep" class="input" inputmode="numeric" maxlength="12" placeholder="Contoh: 482913">
- <div class="grid"><div><label>Mulai (opsional)</label><input id="est" class="input" type="datetime-local"></div><div><label>Selesai (opsional)</label><input id="eet" class="input" type="datetime-local"></div></div>
- <button class="btn green" onclick="addExam()">Simpan Ujian</button></div>
- <div class="card"><h3>Daftar Ujian</h3>${s.docs.length?s.docs.map(d=>examAdminCard(d.id,d.data())).join(""):'<div class="empty">Belum ada ujian.</div>'}</div></div>`;
-}
-function examAdminCard(id,x){return `<div class="exam"><div class="row"><h3>${esc(x.name)}</h3><span class="pill">${x.active===false?"Nonaktif":"Aktif"}</span></div><p>${esc(x.subject||"")} ${x.allowedClasses?.length?"• Kelas: "+esc(x.allowedClasses.join(", ")):"• Semua kelas"}</p><p class="link muted">${esc(x.url)}</p><p class="muted">Jadwal: ${esc(fmtDate(x.startAt))} — ${esc(fmtDate(x.endAt))}</p><button class="btn ${x.active===false?"green":"gray"} small" onclick="toggleExam('${esc(id)}',${x.active!==false})">${x.active===false?"Aktifkan":"Nonaktifkan"}</button> <button class="btn red small" onclick="deleteExam('${esc(id)}')">Hapus</button></div>`}
-async function addExam(){
- const name=en.value.trim(),url=eu.value.trim();if(!name||!isHttps(url))return alert("Nama dan link HTTPS wajib.");
- const allowed=ec.value.split(",").map(x=>x.trim().toUpperCase()).filter(Boolean);
- const data={name,subject:es.value.trim(),description:ed.value.trim(),url,allowedClasses:allowed,active:true,createdAt:firebase.firestore.FieldValue.serverTimestamp()};
- const start=est.value?new Date(est.value):null,end=eet.value?new Date(eet.value):null;
- if(start)data.startAt=start;if(end)data.endAt=end;
- const ref=await db.collection("examPublic").add(data);
- // Keep the PIN out of examPublic. This write may be rejected by current rules until a secure backend/rule is added.
- if(ep.value.trim())try{await db.collection("examSecrets").doc(ref.id).set({pin:ep.value.trim()});}catch(e){alert("Ujian dibuat, tetapi PIN rahasia belum tersimpan karena Rules saat ini menguncinya.");}
- exams();
-}
-async function toggleExam(id,active){await db.collection("examPublic").doc(id).update({active:!active});exams();}
+// ADMIN
+function adminLogin(){app.innerHTML=`<div class="login card"><h1>Login Admin</h1><label>Email</label><input id="eml" class="input" type="email" autocomplete="username"><label>Password</label><input id="aps" class="input" type="password" autocomplete="current-password"><button class="btn block" onclick="doAdmin()">Masuk</button><button class="btn gray block" onclick="home()" style="margin-top:8px">Kembali</button><p id="am"></p></div>`;}
+async function doAdmin(){try{const c=await auth.signInWithEmailAndPassword($("eml").value.trim(),$("aps").value);const d=await db.collection("admins").doc(c.user.uid).get();if(!d.exists||d.data().role!=="admin"||d.data().active!==true){await auth.signOut();return $("am").innerHTML='<span class="error">Akun ini bukan admin aktif.</span>';}admin();}catch(e){$("am").innerHTML='<span class="error">Login admin gagal.</span>';}}
+async function ensureAdmin(){const u=auth.currentUser;if(!u)return false;try{const d=await db.collection("admins").doc(u.uid).get();return d.exists&&d.data().role==="admin"&&d.data().active===true;}catch(e){return false;}}
+async function admin(){if(!await ensureAdmin())return adminLogin();let counts={classes:"-",students:"-",exams:"-"};try{const [a,b,c]=await Promise.all([db.collection("classes").get(),db.collection("students").get(),db.collection("examPublic").get()]);counts={classes:a.size,students:b.size,exams:c.size};}catch(e){}shell(`PakKom Exambro ${VERSION} — Admin`,`<div class="wrap"><h1>Dashboard Admin</h1><div class="grid"><div class="stat">Kelas<b>${counts.classes}</b></div><div class="stat">Siswa<b>${counts.students}</b></div><div class="stat">Ujian<b>${counts.exams}</b></div></div><div class="grid"><div class="card"><h3>Kelas</h3><p>Atur kelas dan password kelas.</p><button class="btn" onclick="classes()">Kelola Kelas</button></div><div class="card"><h3>Siswa</h3><p>Cari, filter, impor Excel/CSV, reset password, dan nonaktifkan akun.</p><button class="btn" onclick="studentsAdmin()">Kelola Siswa</button></div><div class="card"><h3>Ujian</h3><p>Atur link, kelas, PIN, jadwal, dan status ujian.</p><button class="btn" onclick="exams()">Kelola Ujian</button></div></div><p class="notice"><b>Catatan keamanan:</b> V8 tetap kompatibel dengan struktur V7 sehingga password kelas/siswa masih berada di Firestore. Untuk produksi berskala besar, pindahkan validasi password/PIN ke backend (Cloud Functions/Firebase Auth) dan jangan membuka Rules publik.</p></div>`,`auth.signOut().then(home)`,`Keluar`);}
+async function classes(){if(!await ensureAdmin())return adminLogin();let s=await db.collection("classes").get();shell("Kelola Kelas",`<div class="wrap"><div class="card"><h2>Tambah / Atur Kelas</h2><div class="grid"><div><label>Kelas</label><input id="cid" class="input" placeholder="7B"></div><div><label>Password kelas</label><input id="cpass" class="input" type="password" placeholder="Minimal 4 karakter"></div></div><button class="btn green" onclick="saveClass()">Simpan</button></div><div class="card"><div class="table-wrap"><table class="table"><tr><th>Kelas</th><th>Status</th><th>Aksi</th></tr>${s.docs.sort((a,b)=>a.id.localeCompare(b.id,undefined,{numeric:true})).map(d=>{const x=d.data();return `<tr><td><b>${esc(d.id)}</b></td><td><span class="pill ${x.active===false?"red":"green"}">${x.active===false?"Nonaktif":"Aktif"}</span></td><td><div class="actions"><button class="btn gray small" onclick="editClass('${safe(d.id)}')">Ganti Password</button><button class="btn ${x.active===false?"green":"orange"} small" onclick="toggleClass('${safe(d.id)}',${x.active!==false})">${x.active===false?"Aktifkan":"Nonaktifkan"}</button></div></td></tr>`}).join("")}</table></div></div></div>`,`admin()`);}
+async function saveClass(){const id=$("cid").value.trim().toUpperCase(),password=$("cpass").value;if(!id||password.length<4)return alert("Kelas wajib diisi dan password minimal 4 karakter.");await db.collection("classes").doc(id).set({name:id,password,active:true,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});classes();}
+async function editClass(id){const p=prompt("Password kelas baru:");if(p===null)return;if(p.length<4)return alert("Password minimal 4 karakter.");await db.collection("classes").doc(id).update({password:p,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});classes();}
+async function toggleClass(id,a){if(!confirm(`${a?"Nonaktifkan":"Aktifkan"} kelas ${id}?`))return;await db.collection("classes").doc(id).update({active:!a});classes();}
+let adminStudents=[];
+async function studentsAdmin(){if(!await ensureAdmin())return adminLogin();let s=await db.collection("students").get();adminStudents=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")));const classes=[...new Set(adminStudents.map(x=>x.classId).filter(Boolean))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));shell("Kelola Siswa",`<div class="wrap"><div class="card"><h2>Import Data Siswa</h2><div class="filebox"><input id="studentFile" type="file" accept=".xlsx,.xls,.csv"><p class="help">Kolom yang dikenali: <b>NIS</b>, <b>Nama</b>, <b>Kelas</b>, dan opsional <b>Password</b>. Jika Password kosong, default 123456.</p><button class="btn green" onclick="importStudents()">Import Excel / CSV</button> <button class="btn gray" onclick="downloadTemplate()">Unduh Template CSV</button></div><div id="importMsg"></div></div><div class="card"><div class="toolbar"><div><label>Cari siswa</label><input id="sq" class="input" placeholder="NIS atau nama" oninput="renderStudents()"></div><div><label>Filter kelas</label><select id="sf" onchange="renderStudents()"><option value="">Semua kelas</option>${classes.map(c=>`<option>${esc(c)}</option>`).join("")}</select></div><button class="btn gray" onclick="exportStudents()">Export CSV</button></div><div id="studentTable"></div></div></div>`,`admin()`);renderStudents();}
+function renderStudents(){const q=($("sq")?.value||"").trim().toLowerCase(),f=$("sf")?.value||"";const rows=adminStudents.filter(x=>(!f||x.classId===f)&&(!q||String(x.nis||"").toLowerCase().includes(q)||String(x.name||"").toLowerCase().includes(q)));$("studentTable").innerHTML=`<p class="muted">Menampilkan ${rows.length} dari ${adminStudents.length} siswa.</p><div class="table-wrap"><table class="table"><tr><th>NIS</th><th>Nama</th><th>Kelas</th><th>Status</th><th>Aksi</th></tr>${rows.map(x=>`<tr><td>${esc(x.nis)}</td><td>${esc(x.name)}</td><td>${esc(x.classId)}</td><td><span class="pill ${x.active===false?"red":"green"}">${x.active===false?"Nonaktif":"Aktif"}</span></td><td><div class="actions"><button class="btn gray small" onclick="resetStudent('${safe(x.id)}')">Reset Password</button><button class="btn ${x.active===false?"green":"orange"} small" onclick="toggleStudent('${safe(x.id)}',${x.active!==false})">${x.active===false?"Aktifkan":"Nonaktifkan"}</button></div></td></tr>`).join("")}</table></div>`;}
+async function resetStudent(id){const p=prompt("Password baru:","123456");if(p===null)return;if(p.length<6)return alert("Password minimal 6 karakter.");await db.collection("students").doc(id).update({password:p,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});alert("Password berhasil direset.");studentsAdmin();}
+async function toggleStudent(id,a){if(!confirm(`${a?"Nonaktifkan":"Aktifkan"} akun siswa ini?`))return;await db.collection("students").doc(id).update({active:!a});studentsAdmin();}
+function normalizeRow(r){const find=(...names)=>{for(const n of names){const k=Object.keys(r).find(k=>String(k).trim().toLowerCase()===n.toLowerCase());if(k!==undefined)return String(r[k]??"").trim();}return ""};return {nis:find("nis","nisn","nomor induk"),name:find("nama","nama lengkap","name"),classId:find("kelas","class","classid").toUpperCase(),password:find("password","kata sandi")||"123456"};}
+async function importStudents(){const file=$("studentFile").files[0];if(!file)return alert("Pilih file Excel atau CSV terlebih dahulu.");if(typeof XLSX==="undefined")return alert("Library Excel belum termuat. Periksa koneksi internet.");$("importMsg").innerHTML='<span class="info">Membaca file...</span>';try{const buf=await file.arrayBuffer(),wb=XLSX.read(buf,{type:"array"}),ws=wb.Sheets[wb.SheetNames[0]],raw=XLSX.utils.sheet_to_json(ws,{defval:""}),rows=raw.map(normalizeRow).filter(x=>x.nis&&x.name&&x.classId);if(!rows.length)throw new Error("Tidak ada baris valid. Pastikan kolom NIS, Nama, dan Kelas tersedia.");const existing=await db.collection("students").get(),nisSet=new Set(existing.docs.map(d=>String(d.data().nis||"")));let added=0,skipped=0;for(let i=0;i<rows.length;i+=400){const batch=db.batch();for(const r of rows.slice(i,i+400)){if(nisSet.has(r.nis)){skipped++;continue;}const ref=db.collection("students").doc();batch.set(ref,{nis:r.nis,name:r.name,classId:r.classId,password:r.password.length>=6?r.password:"123456",active:true,createdAt:firebase.firestore.FieldValue.serverTimestamp()});nisSet.add(r.nis);added++;}await batch.commit();}$("importMsg").innerHTML=`<span class="success">Import selesai: ${added} siswa ditambahkan, ${skipped} NIS duplikat dilewati.</span>`;setTimeout(studentsAdmin,1200);}catch(e){console.error(e);$("importMsg").innerHTML=`<span class="error">Import gagal: ${esc(e.message)}</span>`;}}
+function downloadTemplate(){const csv='NIS,Nama,Kelas,Password\n10001,Contoh Siswa,7A,123456\n';downloadBlob(csv,"template-siswa-pakkom.csv","text/csv;charset=utf-8");}
+function exportStudents(){const header=["NIS","Nama","Kelas","Status"],lines=[header.join(","),...adminStudents.map(x=>[x.nis,x.name,x.classId,x.active===false?"Nonaktif":"Aktif"].map(csvCell).join(","))];downloadBlob("\ufeff"+lines.join("\n"),"data-siswa-pakkom.csv","text/csv;charset=utf-8");}
+function csvCell(v){const s=String(v??"");return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}
+function downloadBlob(content,name,type){const a=document.createElement("a"),url=URL.createObjectURL(new Blob([content],{type}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),500);}
+async function exams(){if(!await ensureAdmin())return adminLogin();let s=await db.collection("examPublic").get();const docs=s.docs.sort((a,b)=>String(a.data().name||"").localeCompare(String(b.data().name||"")));shell("Kelola Ujian",`<div class="wrap"><div class="card"><h2>Tambah Ujian</h2><div class="grid"><div><label>Nama ujian</label><input id="en" class="input" placeholder="PTS Matematika"></div><div><label>Mata pelajaran</label><input id="es" class="input" placeholder="Matematika"></div></div><label>Deskripsi</label><textarea id="ed" class="input" placeholder="Keterangan singkat"></textarea><label>Link ujian (HTTPS)</label><input id="eu" class="input" placeholder="https://..."><div class="grid"><div><label>Kelas peserta</label><input id="ec" class="input" placeholder="7A,7B atau kosong untuk semua"></div><div><label>PIN ujian</label><input id="ep" class="input" inputmode="numeric" placeholder="Contoh 2468"></div></div><div class="grid"><div><label>Mulai</label><input id="est" class="input" type="datetime-local"></div><div><label>Selesai</label><input id="eet" class="input" type="datetime-local"></div></div><button class="btn green" onclick="addExam()">Simpan Ujian</button></div><div class="card"><h2>Daftar Ujian</h2>${docs.length?docs.map(d=>{const x=d.data();return `<div class="exam"><div class="row"><div><b>${esc(x.name)}</b><div class="muted">${esc(x.subject||"")}</div></div><span class="pill ${x.active===false?"red":"green"}">${x.active===false?"Nonaktif":"Aktif"}</span></div><p>${esc((x.allowedClasses||[]).join(", ")||"Semua kelas")}</p><p class="help">${esc(x.url)}</p><p class="help">${x.startAt?`Mulai ${esc(fmt(x.startAt))}`:"Tanpa jadwal mulai"} • ${x.endAt?`Selesai ${esc(fmt(x.endAt))}`:"Tanpa jadwal selesai"}</p><div class="actions"><button class="btn gray small" onclick="editExam('${safe(d.id)}')">Edit</button><button class="btn ${x.active===false?"green":"orange"} small" onclick="toggleExam('${safe(d.id)}',${x.active!==false})">${x.active===false?"Aktifkan":"Nonaktifkan"}</button><button class="btn red small" onclick="deleteExam('${safe(d.id)}')">Hapus</button></div></div>`}).join(""):'<div class="empty">Belum ada ujian.</div>'}</div></div>`,`admin()`);}
+async function addExam(){const name=$("en").value.trim(),url=$("eu").value.trim();if(!name||!https(url))return alert("Nama dan link HTTPS wajib.");const allowed=$("ec").value.split(",").map(x=>x.trim().toUpperCase()).filter(Boolean),data={name,subject:$("es").value.trim(),description:$("ed").value.trim(),url,allowedClasses:allowed,active:true,createdAt:firebase.firestore.FieldValue.serverTimestamp()};if($("est").value)data.startAt=new Date($("est").value);if($("eet").value)data.endAt=new Date($("eet").value);if(data.startAt&&data.endAt&&data.endAt<=data.startAt)return alert("Waktu selesai harus setelah waktu mulai.");const ref=await db.collection("examPublic").add(data);if($("ep").value.trim())try{await db.collection("examSecrets").doc(ref.id).set({pin:$("ep").value.trim()});}catch(e){alert("Ujian tersimpan, tetapi PIN tidak tersimpan. Periksa Rules.");}exams();}
+async function editExam(id){const d=await db.collection("examPublic").doc(id).get();if(!d.exists)return;const x=d.data();const name=prompt("Nama ujian:",x.name||"");if(name===null)return;const url=prompt("Link ujian HTTPS:",x.url||"");if(url===null||!https(url))return alert("Link harus HTTPS.");const classes=prompt("Kelas peserta, pisahkan koma. Kosong = semua:",(x.allowedClasses||[]).join(","));if(classes===null)return;const pin=prompt("PIN baru (kosong = pertahankan PIN lama):","");await db.collection("examPublic").doc(id).update({name:name.trim()||x.name,url,allowedClasses:classes.split(",").map(v=>v.trim().toUpperCase()).filter(Boolean),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});if(pin.trim())await db.collection("examSecrets").doc(id).set({pin:pin.trim()},{merge:true});exams();}
+async function toggleExam(id,a){await db.collection("examPublic").doc(id).update({active:!a});exams();}
 async function deleteExam(id){if(!confirm("Hapus ujian ini?"))return;await db.collection("examPublic").doc(id).delete();try{await db.collection("examSecrets").doc(id).delete()}catch(e){}exams();}
+
+// Optional warning while this portal tab remains open.
+document.addEventListener("visibilitychange",()=>{if(document.hidden&&state.currentExam){const x=state.currentExam,key=`pakkom_exam_${x.id}`;try{const s=JSON.parse(sessionStorage.getItem(key)||"{}");if(s.startedAt){s.leaveCount=(s.leaveCount||0)+1;s.lastLeaveAt=Date.now();sessionStorage.setItem(key,JSON.stringify(s));}}catch(e){}}});
+Object.assign(window,{home,classGate,verifyClass,studentChoice,registerStudent,doRegister,loginStudent,doStudentLogin,studentDashboard,examPin,verifyPin,requestFullScreen,launchExam,logoutStudent,adminLogin,doAdmin,admin,classes,saveClass,editClass,toggleClass,studentsAdmin,renderStudents,resetStudent,toggleStudent,importStudents,downloadTemplate,exportStudents,exams,addExam,editExam,toggleExam,deleteExam});
 home();
+})();
