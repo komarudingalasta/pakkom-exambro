@@ -1,4 +1,3 @@
-// PakKom Exambro V16.2 — rules sama dengan V16.1; classes sudah mengizinkan admin create/update.
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -106,3 +105,14 @@ service cloud.firestore {
     }
   }
 }
+
+    // Password tampilan admin disimpan terpisah dari dokumen siswa/kelas.
+    // Hanya admin yang boleh membaca atau menulis koleksi ini.
+    match /studentCredentials/{studentId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+
+    match /classCredentials/{classId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+
