@@ -21,3 +21,9 @@ PENTING
 2. Pertahankan config.js yang berisi konfigurasi Firebase proyek Anda.
 3. Firebase Anonymous Authentication harus aktif untuk alur siswa versi Lite.
 4. Untuk keamanan produksi penuh, PIN/login siswa idealnya dipindahkan ke server/Cloud Functions pada versi Secure berikutnya.
+
+
+V16.1 IMPORT FIX
+- Memperbaiki Firestore Rules agar admin dapat membuat siswa manual dan import Excel/CSV.
+- Memperjelas pesan error antara file gagal dibaca dan upload Firestore ditolak.
+- Wajib publish firestore.rules V16.1.

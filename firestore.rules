@@ -17,10 +17,13 @@ service cloud.firestore {
     match /students/{studentId} {
       allow read: if request.auth != null;
 
-      allow create: if request.auth != null
-        && request.resource.data.approved == false
-        && request.resource.data.active == false
-        && request.resource.data.registrationSource == "self";
+      // Admin boleh membuat siswa manual maupun melalui import Excel/CSV.
+      // Siswa biasa hanya boleh membuat pendaftaran mandiri dalam status pending/nonaktif.
+      allow create: if isAdmin()
+        || (request.auth != null
+          && request.resource.data.approved == false
+          && request.resource.data.active == false
+          && request.resource.data.registrationSource == "self");
 
       allow delete: if isAdmin();
 
