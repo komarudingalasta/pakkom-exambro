@@ -803,3 +803,105 @@ body[data-view*="control"] tbody tr:hover{background:#fafcff}
   body[data-view^="kelola-"] td{padding:9px 8px}
   .actions>.btn{flex:0 0 auto}
 }
+
+
+/* ======================================================================
+   V16.6 — Responsive Admin UI
+   ====================================================================== */
+:root{
+  --v166-navy:#0c3c73;
+  --v166-blue:#1769e0;
+  --v166-green:#10a46d;
+  --v166-purple:#6952d8;
+  --v166-orange:#ff8a16;
+  --v166-bg:#f5f7fb;
+  --v166-line:#e5e9f0;
+  --v166-text:#172033;
+  --v166-muted:#6d7788;
+}
+.ui-icon{display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center;flex:0 0 20px}
+.ui-icon svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.btn.outline{background:#fff;color:var(--v166-blue);border:1px solid #9ebbe2;box-shadow:none}
+.admin-dashboard-v166{max-width:1050px}
+.dash-heading,.page-title-row{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px}
+.dash-heading h1,.page-title-row h1{margin:0 0 4px}
+.dash-heading p,.page-title-row p{margin:0}
+.mobile-admin-menu{display:none}
+.admin-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:18px}
+.summary-tile{appearance:none;border:1px solid var(--v166-line);background:#fff;border-radius:16px;padding:18px;text-align:left;display:grid;grid-template-columns:44px 1fr auto;grid-template-areas:"icon copy value" "icon copy chevron";gap:2px 12px;align-items:center;box-shadow:0 5px 18px rgba(18,59,112,.05);cursor:pointer;color:var(--v166-text)}
+.summary-icon{grid-area:icon;width:42px;height:42px;border-radius:13px;display:grid;place-items:center;color:#fff}
+.summary-copy{grid-area:copy;display:flex;flex-direction:column;min-width:0}.summary-copy b{font-size:16px}.summary-copy small{color:var(--v166-muted);margin-top:4px}
+.summary-tile strong{grid-area:value;font-size:24px;line-height:1}.summary-word{font-size:15px!important}
+.summary-tile>.dash-chevron{grid-area:chevron;justify-self:end;color:#7b8798}
+.tile-blue .summary-icon{background:linear-gradient(135deg,#1769e0,#3d86ef)}.tile-blue strong{color:#1769e0}
+.tile-green .summary-icon{background:linear-gradient(135deg,#10a46d,#35bf8d)}.tile-green strong{color:#10a46d}
+.tile-purple .summary-icon{background:linear-gradient(135deg,#6952d8,#8a74ea)}.tile-purple strong{color:#6952d8}
+.tile-orange .summary-icon{background:linear-gradient(135deg,#ff8a16,#ffad51)}.tile-orange strong{color:#159e68}
+.dashboard-lower-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(300px,.85fr);gap:18px}
+.clean-card{margin:0!important;padding:18px!important}
+.card-headline{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}.card-headline h2{margin:0 0 3px;font-size:18px}.card-headline p{font-size:12px;margin:0}
+.text-action{border:0;background:transparent;color:var(--v166-blue);font-weight:700;cursor:pointer;padding:7px}
+.dash-exam-list{display:flex;flex-direction:column;gap:8px}
+.dash-exam-row{appearance:none;width:100%;border:1px solid #e7ebf1;background:#fff;border-radius:13px;padding:10px;display:grid;grid-template-columns:48px 1fr auto;gap:11px;align-items:center;text-align:left;color:var(--v166-text);cursor:pointer}
+.dash-date,.schedule-date{width:48px;height:53px;border-radius:11px;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1}
+.dash-date b,.schedule-date b{font-size:20px}.dash-date small,.schedule-date small{font-size:9px;margin-top:5px;font-weight:800}
+.blue{background:linear-gradient(145deg,#0f58b6,#1f72df)}.green{background:linear-gradient(145deg,#0f9f67,#1bb27a)}.purple{background:linear-gradient(145deg,#5b43ca,#795ee6)}.orange{background:linear-gradient(145deg,#ef7900,#ff981c)}
+.dash-exam-copy{display:flex;flex-direction:column;min-width:0}.dash-exam-copy b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dash-exam-copy small{color:var(--v166-muted);font-size:11px;margin-top:4px}
+.dash-chevron{font-size:24px;color:#8b95a5}
+.admin-shortcuts{display:flex;flex-direction:column}
+.shortcut-row{appearance:none;border:0;border-top:1px solid #edf0f4;background:#fff;padding:13px 3px;display:grid;grid-template-columns:28px 1fr auto;gap:9px;align-items:center;text-align:left;color:var(--v166-text);cursor:pointer}
+.shortcut-row:first-of-type{border-top:0}.shortcut-row>span:nth-child(2){display:flex;flex-direction:column}.shortcut-row b{font-size:13px}.shortcut-row small{font-size:11px;color:var(--v166-muted);margin-top:3px}.shortcut-row.static{cursor:default}
+.status-dot{width:12px;height:12px;border-radius:50%;margin-left:5px}.status-dot.green{background:#15ad72}.status-dot.red{background:#e24d4d}
+.admin-footer{text-align:center;color:#8a94a4;font-size:11px;padding:25px 0 4px}
+
+/* Exam list */
+.exam-admin-v166{max-width:920px}
+.add-exam-button{white-space:nowrap}
+.hidden-panel{display:none!important}
+.exam-create-panel{scroll-margin-top:80px}
+.exam-schedule-list{display:flex;flex-direction:column;gap:10px}
+.exam-schedule-card{background:#fff;border:1px solid var(--v166-line);border-radius:16px;padding:13px;display:grid;grid-template-columns:56px 1fr;gap:13px;box-shadow:0 4px 15px rgba(18,59,112,.04)}
+.schedule-date{width:56px;height:64px;border-radius:12px}
+.schedule-date b{font-size:22px}.schedule-date small{font-size:10px}
+.schedule-main{min-width:0}.schedule-title-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.schedule-title-row h3{font-size:16px;margin:2px 0 3px}.schedule-title-row p{margin:0;color:#495569;font-size:13px}
+.kebab{width:38px;height:38px;border:1px solid #e5e9f0;border-radius:10px;background:#fff;color:#596477;font-size:22px;line-height:1;cursor:pointer;flex:0 0 38px}
+.schedule-lines{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:11px 0 9px;color:#5e6b80;font-size:11px}.schedule-lines>span{display:inline-flex;align-items:center;gap:5px}.schedule-lines .ui-icon{width:16px;height:16px;flex-basis:16px}
+.schedule-foot{display:flex;justify-content:space-between;align-items:center;gap:10px}.class-list{color:#7a8495;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Sheets */
+.mobile-sheet-backdrop{position:fixed;inset:0;z-index:100000;background:rgba(12,25,45,.48);display:flex;align-items:flex-end;justify-content:center;padding:0}
+.mobile-sheet{width:min(560px,100%);background:#fff;border-radius:22px 22px 0 0;padding:8px 16px max(18px,env(safe-area-inset-bottom));box-shadow:0 -16px 50px rgba(0,0,0,.18);max-height:88vh;overflow:auto}
+.sheet-handle{width:42px;height:4px;background:#d8dde5;border-radius:99px;margin:1px auto 14px}
+.sheet-title-row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:0 3px 12px}.sheet-title-row h2{font-size:20px;margin:0 0 3px}.sheet-title-row p{font-size:12px;margin:0}
+.sheet-close{border:0;background:transparent;width:38px;height:38px;font-size:27px;color:#253248;cursor:pointer}
+.mobile-sheet>button:not(.sheet-close){appearance:none;width:100%;border:0;border-top:1px solid #edf0f4;background:#fff;padding:14px 5px;display:grid;grid-template-columns:27px 1fr auto;gap:10px;align-items:center;text-align:left;color:#1c2a40;cursor:pointer}
+.mobile-sheet>button>span:nth-child(2){display:flex;flex-direction:column}.mobile-sheet>button b{font-size:14px}.mobile-sheet>button small{font-size:11px;color:#768195;margin-top:3px}.mobile-sheet>button.danger{color:#c72d2d}.mobile-sheet>button.sheet-logout{display:block;text-align:center;border:1px solid #efaaaa;color:#c72d2d;border-radius:12px;margin-top:10px}
+.admin-nav-sheet .ui-icon{color:#264c80}
+
+/* General mobile top bar closer to reference */
+.top-brand-copy{display:flex;flex-direction:column;min-width:0}.top-brand-copy span{font-size:10px;opacity:.84;margin-top:2px}
+@media(max-width:760px){
+ body{background:#f7f8fb}
+ .top{min-height:72px;padding:12px 17px;background:linear-gradient(135deg,#0c3c73,#123b70)}
+ .top .brand{gap:10px}.top .brand .logo{width:38px;height:38px}
+ .top>.btn{background:transparent!important;color:#ff7777!important;border:1px solid #e05a67!important;min-height:40px}
+ .wrap{width:100%;padding:20px 16px 34px}
+ .mobile-admin-menu{display:inline-flex}
+ .admin-summary-grid{grid-template-columns:1fr;gap:8px}
+ .summary-tile{min-height:82px;padding:13px 14px;border-radius:14px;grid-template-columns:44px 1fr auto 18px;grid-template-areas:"icon copy value chevron"}
+ .summary-tile>.dash-chevron{grid-area:chevron}.summary-icon{width:42px;height:42px}.summary-tile strong{font-size:22px}
+ .dashboard-lower-grid{grid-template-columns:1fr;gap:12px}
+ .clean-card{padding:15px!important}
+ .admin-shortcuts{display:none}
+ .dash-heading{margin-bottom:15px}.dash-heading h1{font-size:27px}
+ .page-title-row{align-items:flex-start}.page-title-row h1{font-size:23px}.add-exam-button{min-height:41px;padding:9px 12px}
+ .exam-schedule-card{grid-template-columns:56px 1fr;padding:12px 11px;border-radius:14px}
+ .schedule-lines{display:grid;grid-template-columns:1fr 1fr;gap:7px 10px;margin-top:10px}.schedule-lines>span:first-child{grid-column:1/-1}
+ .schedule-foot{margin-top:8px}.class-list{max-width:150px}
+ .exam-create-panel{border-radius:15px;padding:16px!important}
+ .exam-create-panel .form-section{padding:13px;margin:10px 0}
+}
+@media(min-width:761px){
+ .mobile-sheet{border-radius:22px;margin-bottom:4vh}
+ .mobile-sheet-backdrop{align-items:center;padding:20px}
+}
