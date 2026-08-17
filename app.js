@@ -154,7 +154,7 @@ function checkIdle(){
  if(!state.student)return;
  // Jangan pernah mengeluarkan siswa hanya karena aktivitas di iframe
  // tidak terdeteksi selama ujian masih berlangsung.
- if(state.currentExam||loadActiveExamId()){
+ if(state.currentExam||readActiveExam()){
   markActivity();
   return;
  }
@@ -178,7 +178,7 @@ async function home(){
 }
 function renderHome(note){
  var logo=branding.logoDataUrl?'<div class="home-brand-logo uploaded"><img src="'+esc(branding.logoDataUrl)+'" alt="Logo"></div>':'<div class="home-brand-logo">P</div>';
- app.innerHTML='<main class="home-page simple-home"><section class="simple-login-shell"><div class="simple-brand">'+logo+'<div><h1>'+esc(brandName())+'</h1>'+(branding.schoolName?'<p>'+esc(branding.schoolName)+'</p>':'')+'</div></div><div class="card simple-login-card"><h2>Masuk</h2><p class="muted">Gunakan NIS siswa atau email admin.</p>'+(note?'<div class="notice">'+esc(note)+'</div>':'')+'<label>NIS / Email Admin</label><input id="unifiedAccount" class="input" autocomplete="username" placeholder="NIS atau email"><label>Password</label><input id="unifiedPass" class="input" type="password" autocomplete="current-password" placeholder="Password"><button class="btn block" id="unifiedLogin">Masuk</button><button class="btn gray block" id="newStudent" style="margin-top:8px">Daftar Siswa Baru</button><div id="unifiedMsg"></div></div><div class="home-version">PakKom Exambro V16.6.2.1</div></section></main>';
+ app.innerHTML='<main class="home-page simple-home"><section class="simple-login-shell"><div class="simple-brand">'+logo+'<div><h1>'+esc(brandName())+'</h1>'+(branding.schoolName?'<p>'+esc(branding.schoolName)+'</p>':'')+'</div></div><div class="card simple-login-card"><h2>Masuk</h2><p class="muted">Gunakan NIS siswa atau email admin.</p>'+(note?'<div class="notice">'+esc(note)+'</div>':'')+'<label>NIS / Email Admin</label><input id="unifiedAccount" class="input" autocomplete="username" placeholder="NIS atau email"><label>Password</label><input id="unifiedPass" class="input" type="password" autocomplete="current-password" placeholder="Password"><button class="btn block" id="unifiedLogin">Masuk</button><button class="btn gray block" id="newStudent" style="margin-top:8px">Daftar Siswa Baru</button><div id="unifiedMsg"></div></div><div class="home-version">PakKom Exambro V16.6.3.1</div></section></main>';
  el('unifiedLogin').onclick=doUnifiedLogin;el('newStudent').onclick=classGate;el('unifiedPass').onkeydown=function(e){if(e.key==='Enter')doUnifiedLogin();};
 }
 async function doUnifiedLogin(){
@@ -212,7 +212,7 @@ async function loadClasses(){
 async function classGate(){
  app.innerHTML='<div class="login card"><h1>Masuk Kelas</h1><label>Kelas</label><select id="kelas"><option>Memuat…</option></select><label>Password Kelas</label><input id="kpw" class="input" type="password"><button class="btn block" id="goClass">Lanjut</button><button class="btn gray block" id="backHome" style="margin-top:8px">Kembali</button><div id="classMsg"></div></div>';
  el('backHome').onclick=home;el('goClass').onclick=verifyClass;
- var ok=await loadClasses();var s=el('kelas');if(ok&&classList.length)s.innerHTML='<option value="">-- Pilih kelas --</option>'+classList.map(function(x){return '<option value="'+esc(x.id)+'">'+esc(x.name||x.id)+'</option>';}).join('');else{s.innerHTML='<option value="">-- Kelas belum tersedia --</option>';msg('classMsg','Kelas gagal dimuat. Pastikan Anonymous Authentication aktif dan Firestore Rules V16.6.2 sudah dipublish.');}
+ var ok=await loadClasses();var s=el('kelas');if(ok&&classList.length)s.innerHTML='<option value="">-- Pilih kelas --</option>'+classList.map(function(x){return '<option value="'+esc(x.id)+'">'+esc(x.name||x.id)+'</option>';}).join('');else{s.innerHTML='<option value="">-- Kelas belum tersedia --</option>';msg('classMsg','Kelas gagal dimuat. Pastikan Anonymous Authentication aktif dan Firestore Rules V16.6.3 sudah dipublish.');}
 }
 async function verifyClass(){
  var id=el('kelas').value,p=el('kpw').value;if(!id||!p){msg('classMsg','Pilih kelas dan masukkan password.');return;}
@@ -475,7 +475,7 @@ async function classesAdmin(){
   var credSnap=await db.collection('classCredentials').get();
   credSnap.docs.forEach(function(d){cred[d.id]=String(d.data().password||'');});
  }catch(e){
-  return pakkomAlert('Password kelas tidak dapat dimuat. Pastikan Firestore Rules V16.6.2 sudah dipublish. '+(e.code||e.message));
+  return pakkomAlert('Password kelas tidak dapat dimuat. Pastikan Firestore Rules V16.6.3 sudah dipublish. '+(e.code||e.message));
  }
  var rows=s.docs.sort(function(a,b){return a.id.localeCompare(b.id);}).map(function(d){var x=d.data(),pw=cred[d.id]||'';return '<tr><td><b>'+esc(d.id)+'</b></td><td>'+esc(x.name||d.id)+'</td><td><span class="admin-password">'+(pw?esc(pw):'<span class="muted">Belum tersimpan</span>')+'</span></td><td>'+(x.active===false?'Nonaktif':'Aktif')+'</td><td><button class="btn gray small class-edit" data-id="'+esc(d.id)+'">Edit</button> <button class="btn small '+(x.active===false?'green':'orange')+' class-toggle" data-id="'+esc(d.id)+'" data-active="'+(x.active===false?'0':'1')+'">'+(x.active===false?'Aktifkan':'Nonaktifkan')+'</button></td></tr>';}).join('');
  top('Kelola Kelas','<div class="wrap"><div class="card"><h2>Tambah Kelas</h2><div class="grid"><input id="cid" class="input" placeholder="Kode kelas, contoh 7A"><input id="cname" class="input" placeholder="Nama kelas"><input id="cpass" class="input" value="123456" placeholder="Password kelas"></div><button class="btn green" id="saveClassBtn">Tambah Kelas</button></div><div class="card"><div class="notice"><b>Password kelas</b> hanya ditampilkan kepada admin. Kelas lama yang sebelumnya hanya menyimpan hash akan bertuliskan <b>Belum tersimpan</b>; klik Edit lalu tetapkan password baru agar dapat ditampilkan.</div><div class="table-wrap"><table><thead><tr><th>Kode</th><th>Nama</th><th>Password</th><th>Status</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table></div></div></div>',admin,'Admin');
@@ -500,7 +500,7 @@ async function studentsAdmin(){
  try{
   window.adminStudentPasswords=await getStudentCredentials();
  }catch(e){
-  return pakkomAlert('Password siswa tidak dapat dimuat. Pastikan Firestore Rules V16.6.2 sudah dipublish. '+(e.code||e.message));
+  return pakkomAlert('Password siswa tidak dapat dimuat. Pastikan Firestore Rules V16.6.3 sudah dipublish. '+(e.code||e.message));
  }
  adminStudents=s.docs.map(function(d){return Object.assign({id:d.id},d.data());}).sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''));});var classes=[...new Set(adminStudents.map(function(x){return x.classId;}).filter(Boolean))].sort();top('Kelola Siswa','<div class="wrap"><div class="card"><h2>Tambah Manual</h2><div class="grid"><input id="anIS" class="input" placeholder="NIS"><input id="anName" class="input" placeholder="Nama"><input id="anClass" class="input" placeholder="Kelas"><input id="anPass" class="input" placeholder="Password (default 123456)"></div><button class="btn green" id="addManual">Tambah Siswa</button></div><div class="card"><h2>Upload Excel</h2><p class="muted">Kolom: NIS | Nama | Kelas | Password. Password siswa kosong = 123456. Kelas yang belum ada dibuat otomatis dengan password kelas 123456.</p><input id="excelFile" class="input" type="file" accept=".xlsx,.xls,.csv"><div class="actions"><button class="btn" id="importExcel">Upload Data</button><button class="btn gray" id="templateExcel">Download Template</button></div><div id="importMsg"></div></div><div class="card"><div class="grid"><input id="studentSearch" class="input" placeholder="Cari NIS/nama"><select id="studentFilter"><option value="">Semua kelas</option>'+classes.map(function(c){return '<option>'+esc(c)+'</option>';}).join('')+'</select></div><div class="bulk-bar"><span id="bulkCount">0 dipilih</span><div class="actions"><button class="btn green small" id="bulkApprove" disabled>Approve</button><button class="btn gray small" id="bulkActivate" disabled>Aktifkan</button><button class="btn orange small" id="bulkDeactivate" disabled>Nonaktifkan</button><button class="btn red small" id="bulkDelete" disabled>Hapus</button></div></div><div id="studentTable"></div></div></div>',admin,'Admin');el('addManual').onclick=addStudentManual;el('importExcel').onclick=importExcel;el('templateExcel').onclick=downloadTemplate;el('studentSearch').oninput=renderStudents;el('studentFilter').onchange=renderStudents;el('bulkApprove').onclick=function(){bulkStudents('approve');};el('bulkActivate').onclick=function(){bulkStudents('activate');};el('bulkDeactivate').onclick=function(){bulkStudents('deactivate');};el('bulkDelete').onclick=function(){bulkStudents('delete');};renderStudents();}
 function selectedStudentIds(){return Array.prototype.map.call(document.querySelectorAll('.student-check:checked'),function(c){return c.dataset.id;});}
