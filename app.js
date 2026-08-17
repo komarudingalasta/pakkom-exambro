@@ -6,7 +6,7 @@ var SESSION_KEY='pakkom_v12_lite_student';
 var ACTIVE_EXAM_KEY='pakkom_v12_lite_active_exam';
 var EXAM_WARN_KEY='pakkom_v16_exam_warnings';
 var SERVER_OFFSET_MS=0,SERVER_TIME_SYNCED=false,monitorUnsubs=[];
-var INACTIVITY_LIMIT=60*60*1000, ACTIVITY_WRITE_GAP=15000,lastWrite=0;
+var INACTIVITY_LIMIT=12*60*60*1000, ACTIVITY_WRITE_GAP=15000,EXAM_SESSION_HEARTBEAT=60000,lastWrite=0,examSessionHeartbeatHandle=null;
 var state={classId:'',student:null,exams:[],currentExam:null};
 var classList=[],adminStudents=[],examTimerHandle=null,examGuardActive=false,lastExamViolationAt=0,networkWasOffline=false;
 var branding={appName:'PakKom Exambro',schoolName:'',logoDataUrl:''};
@@ -67,7 +67,7 @@ async function forceCompleteForViolation(x){
  try{
   var ref=db.collection('examAttempts').doc(attemptId(x.id)),at=await getAttempt(x.id);
   await ref.set({examId:x.id,studentId:state.student.id,nis:state.student.nis,classId:state.classId,status:'completed',createdByAuthUid:(at&&at.createdByAuthUid)||auth.currentUser.uid,completedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),autoCompleted:true,completionReason:'left_exam_twice',violationCount:Math.max(2,Number(at&&at.violationCount||2))},{merge:true});
-  stopExamTimer();saveActiveExam('');clearExamWarningCount(x.id);state.currentExam=null;
+  stopExamTimer();stopExamSessionHeartbeat();saveActiveExam('');clearExamWarningCount(x.id);state.currentExam=null;
   await pakkomAlert('Anda terdeteksi keluar dari halaman ujian sebanyak 2 kali. Ujian otomatis dianggap selesai dan telah dikunci.','Ujian Dikunci');studentDashboard();
  }catch(e){examGuardActive=true;pakkomAlert('Pelanggaran terdeteksi, tetapi status ujian gagal dikunci: '+(e.code||e.message));}
 }
@@ -129,7 +129,20 @@ async function isAdmin(){
 }
 function readSession(){try{return JSON.parse(localStorage.getItem(SESSION_KEY)||'null');}catch(e){return null;}}
 function saveSession(){if(!state.student)return;var now=Date.now();localStorage.setItem(SESSION_KEY,JSON.stringify({id:state.student.id,classId:state.classId,lastActivity:now}));lastWrite=now;}
-function clearSession(){localStorage.removeItem(SESSION_KEY);localStorage.removeItem(ACTIVE_EXAM_KEY);state={classId:'',student:null,exams:[],currentExam:null};lastWrite=0;}
+function stopExamSessionHeartbeat(){if(examSessionHeartbeatHandle){clearInterval(examSessionHeartbeatHandle);examSessionHeartbeatHandle=null;}}
+function startExamSessionHeartbeat(){
+ stopExamSessionHeartbeat();
+ markActivity();
+ examSessionHeartbeatHandle=setInterval(function(){
+  if(!state.student||!state.currentExam){stopExamSessionHeartbeat();return;}
+  var s=readSession();
+  if(!s||s.id!==state.student.id)return;
+  s.lastActivity=Date.now();
+  localStorage.setItem(SESSION_KEY,JSON.stringify(s));
+  lastWrite=Date.now();
+ },EXAM_SESSION_HEARTBEAT);
+}
+function clearSession(){stopExamSessionHeartbeat();localStorage.removeItem(SESSION_KEY);localStorage.removeItem(ACTIVE_EXAM_KEY);state={classId:'',student:null,exams:[],currentExam:null};lastWrite=0;}
 function saveActiveExam(examId){if(examId)localStorage.setItem(ACTIVE_EXAM_KEY,String(examId));else localStorage.removeItem(ACTIVE_EXAM_KEY);}
 function readActiveExam(){return localStorage.getItem(ACTIVE_EXAM_KEY)||'';}
 function attemptId(examId){return String(state.student.id)+'__'+String(examId);}
@@ -137,7 +150,20 @@ async function getAttempt(examId){try{var d=await db.collection('examAttempts').
 async function getAttemptsForStudent(){try{var q=await db.collection('examAttempts').where('studentId','==',state.student.id).get(),m={};q.docs.forEach(function(d){var x=d.data();m[String(x.examId)]=Object.assign({id:d.id},x);});return m;}catch(e){console.warn('getAttemptsForStudent',e);return {};}}
 function expired(s){return !s||!s.lastActivity||Date.now()-Number(s.lastActivity)>=INACTIVITY_LIMIT;}
 function markActivity(){if(!state.student)return;var now=Date.now();if(now-lastWrite<ACTIVITY_WRITE_GAP)return;var s=readSession();if(!s||s.id!==state.student.id)return;s.lastActivity=now;localStorage.setItem(SESSION_KEY,JSON.stringify(s));lastWrite=now;}
-function checkIdle(){if(!state.student)return;var s=readSession();if(expired(s)){clearSession();renderHome('Sesi berakhir karena 60 menit tidak ada aktivitas.');}}
+function checkIdle(){
+ if(!state.student)return;
+ // Jangan pernah mengeluarkan siswa hanya karena aktivitas di iframe
+ // tidak terdeteksi selama ujian masih berlangsung.
+ if(state.currentExam||loadActiveExamId()){
+  markActivity();
+  return;
+ }
+ var s=readSession();
+ if(expired(s)){
+  clearSession();
+  renderHome('Sesi siswa telah berakhir. Silakan masuk kembali.');
+ }
+}
 async function restoreStudent(){
  var s=readSession();if(!s||expired(s)){clearSession();return false;}
  try{await ensureAnon();var d=await db.collection('students').doc(s.id).get();if(!d.exists){clearSession();return false;}var x=d.data();if(x.approved!==true||x.active!==true||String(x.classId)!==String(s.classId)){clearSession();return false;}state.classId=s.classId;state.student=Object.assign({id:d.id},x);lastWrite=Number(s.lastActivity)||Date.now();return true;}catch(e){clearSession();return false;}
@@ -152,7 +178,7 @@ async function home(){
 }
 function renderHome(note){
  var logo=branding.logoDataUrl?'<div class="home-brand-logo uploaded"><img src="'+esc(branding.logoDataUrl)+'" alt="Logo"></div>':'<div class="home-brand-logo">P</div>';
- app.innerHTML='<main class="home-page simple-home"><section class="simple-login-shell"><div class="simple-brand">'+logo+'<div><h1>'+esc(brandName())+'</h1>'+(branding.schoolName?'<p>'+esc(branding.schoolName)+'</p>':'')+'</div></div><div class="card simple-login-card"><h2>Masuk</h2><p class="muted">Gunakan NIS siswa atau email admin.</p>'+(note?'<div class="notice">'+esc(note)+'</div>':'')+'<label>NIS / Email Admin</label><input id="unifiedAccount" class="input" autocomplete="username" placeholder="NIS atau email"><label>Password</label><input id="unifiedPass" class="input" type="password" autocomplete="current-password" placeholder="Password"><button class="btn block" id="unifiedLogin">Masuk</button><button class="btn gray block" id="newStudent" style="margin-top:8px">Daftar Siswa Baru</button><div id="unifiedMsg"></div></div><div class="home-version">PakKom Exambro V16.2</div></section></main>';
+ app.innerHTML='<main class="home-page simple-home"><section class="simple-login-shell"><div class="simple-brand">'+logo+'<div><h1>'+esc(brandName())+'</h1>'+(branding.schoolName?'<p>'+esc(branding.schoolName)+'</p>':'')+'</div></div><div class="card simple-login-card"><h2>Masuk</h2><p class="muted">Gunakan NIS siswa atau email admin.</p>'+(note?'<div class="notice">'+esc(note)+'</div>':'')+'<label>NIS / Email Admin</label><input id="unifiedAccount" class="input" autocomplete="username" placeholder="NIS atau email"><label>Password</label><input id="unifiedPass" class="input" type="password" autocomplete="current-password" placeholder="Password"><button class="btn block" id="unifiedLogin">Masuk</button><button class="btn gray block" id="newStudent" style="margin-top:8px">Daftar Siswa Baru</button><div id="unifiedMsg"></div></div><div class="home-version">PakKom Exambro V16.6.2.1</div></section></main>';
  el('unifiedLogin').onclick=doUnifiedLogin;el('newStudent').onclick=classGate;el('unifiedPass').onkeydown=function(e){if(e.key==='Enter')doUnifiedLogin();};
 }
 async function doUnifiedLogin(){
@@ -186,7 +212,7 @@ async function loadClasses(){
 async function classGate(){
  app.innerHTML='<div class="login card"><h1>Masuk Kelas</h1><label>Kelas</label><select id="kelas"><option>Memuat…</option></select><label>Password Kelas</label><input id="kpw" class="input" type="password"><button class="btn block" id="goClass">Lanjut</button><button class="btn gray block" id="backHome" style="margin-top:8px">Kembali</button><div id="classMsg"></div></div>';
  el('backHome').onclick=home;el('goClass').onclick=verifyClass;
- var ok=await loadClasses();var s=el('kelas');if(ok&&classList.length)s.innerHTML='<option value="">-- Pilih kelas --</option>'+classList.map(function(x){return '<option value="'+esc(x.id)+'">'+esc(x.name||x.id)+'</option>';}).join('');else{s.innerHTML='<option value="">-- Kelas belum tersedia --</option>';msg('classMsg','Kelas gagal dimuat. Pastikan Anonymous Authentication aktif dan firestore.rules V12 Lite sudah dipublish.');}
+ var ok=await loadClasses();var s=el('kelas');if(ok&&classList.length)s.innerHTML='<option value="">-- Pilih kelas --</option>'+classList.map(function(x){return '<option value="'+esc(x.id)+'">'+esc(x.name||x.id)+'</option>';}).join('');else{s.innerHTML='<option value="">-- Kelas belum tersedia --</option>';msg('classMsg','Kelas gagal dimuat. Pastikan Anonymous Authentication aktif dan Firestore Rules V16.6.2 sudah dipublish.');}
 }
 async function verifyClass(){
  var id=el('kelas').value,p=el('kpw').value;if(!id||!p){msg('classMsg','Pilih kelas dan masukkan password.');return;}
@@ -287,14 +313,14 @@ async function launchExam(x){
 function resumeExam(x){
  syncServerClock();state.currentExam=x;saveActiveExam(x.id);var u=embedUrl(x.url),wc=getExamWarningCount(x.id);if(wc>=2){app.innerHTML='<div class="login card"><h2>Mengunci ujian…</h2><p class="muted">Batas pelanggaran perpindahan halaman telah tercapai.</p></div>';disableExamGuard();forceCompleteForViolation(x);return;}
  app.innerHTML='<div class="exam-page"><div class="exam-topbar"><div class="exam-title">'+brandLogo('logo')+'<div><b>'+esc(x.name)+'</b><span>'+esc(x.subject||'Ujian online')+'</span></div></div><div class="exam-timer"><span>Sisa Waktu</span><b id="examCountdown">--:--:--</b></div><button class="btn finish-btn" id="finishExam">Sudah Selesai Mengerjakan</button></div><div class="exam-info-bar"><span><b>'+esc(state.student.name)+'</b> • Kelas '+esc(state.classId)+'</span><span>Jadwal '+esc(timeOnly(x.startAt))+' – '+esc(timeOnly(x.endAt))+'</span><button class="btn gray small" id="fullBtn">Fullscreen</button></div><div class="exam-warning"><b>Mode ujian aktif.</b> Jangan berpindah tab/aplikasi. Pelanggaran '+wc+'/2. Pelanggaran kedua akan otomatis mengakhiri ujian.</div><div class="exam-frame-wrap"><iframe class="exam-frame" src="'+esc(u)+'" allow="fullscreen" referrerpolicy="no-referrer-when-downgrade"></iframe></div></div>';
- el('fullBtn').onclick=function(){var target=document.documentElement;if(target.requestFullscreen)target.requestFullscreen().catch(function(){});};el('finishExam').onclick=finishCurrentExam;startExamTimer(x);enableExamGuard();
+ el('fullBtn').onclick=function(){var target=document.documentElement;if(target.requestFullscreen)target.requestFullscreen().catch(function(){});};el('finishExam').onclick=finishCurrentExam;startExamTimer(x);startExamSessionHeartbeat();enableExamGuard();
 }
 async function finishCurrentExam(){
  var x=state.currentExam;if(!x)return;var confirmed=await pakkomConfirm('Pastikan jawaban sudah dikirim. Setelah ditandai selesai, ujian ini tidak dapat dikerjakan lagi. Lanjutkan?');if(!confirmed)return;disableExamGuard();
  var b=el('finishExam');if(b){b.disabled=true;b.textContent='Menyimpan…';}
- try{var ref=db.collection('examAttempts').doc(attemptId(x.id)),at=await getAttempt(x.id);if(at&&at.status==='completed'){stopExamTimer();saveActiveExam('');state.currentExam=null;return studentDashboard();}await ref.set({examId:x.id,studentId:state.student.id,nis:state.student.nis,classId:state.classId,status:'completed',createdByAuthUid:(at&&at.createdByAuthUid)||auth.currentUser.uid,completedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});stopExamTimer();saveActiveExam('');clearExamWarningCount(x.id);state.currentExam=null;await pakkomAlert('Ujian sudah selesai dan telah dikunci.');studentDashboard();}catch(e){enableExamGuard();if(b){b.disabled=false;b.textContent='Sudah Selesai Mengerjakan';}pakkomAlert('Status selesai gagal disimpan: '+(e.code||e.message));}
+ try{var ref=db.collection('examAttempts').doc(attemptId(x.id)),at=await getAttempt(x.id);if(at&&at.status==='completed'){stopExamTimer();stopExamSessionHeartbeat();saveActiveExam('');state.currentExam=null;return studentDashboard();}await ref.set({examId:x.id,studentId:state.student.id,nis:state.student.nis,classId:state.classId,status:'completed',createdByAuthUid:(at&&at.createdByAuthUid)||auth.currentUser.uid,completedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});stopExamTimer();stopExamSessionHeartbeat();saveActiveExam('');clearExamWarningCount(x.id);state.currentExam=null;await pakkomAlert('Ujian sudah selesai dan telah dikunci.');studentDashboard();}catch(e){enableExamGuard();if(b){b.disabled=false;b.textContent='Sudah Selesai Mengerjakan';}pakkomAlert('Status selesai gagal disimpan: '+(e.code||e.message));}
 }
-function studentLogout(){disableExamGuard();stopExamTimer();clearSession();home();}
+function studentLogout(){disableExamGuard();stopExamTimer();stopExamSessionHeartbeat();clearSession();home();}
 
 function adminLogin(){app.innerHTML='<div class="login card"><h1>Login Admin</h1><label>Email</label><input id="aemail" class="input" type="email"><label>Password</label><input id="apass" class="input" type="password"><button class="btn block" id="doAdmin">Masuk</button><button class="btn gray block" id="bkAdmin" style="margin-top:8px">Kembali</button><div id="adminMsg"></div></div>';el('doAdmin').onclick=doAdminLogin;el('bkAdmin').onclick=home;}
 async function doAdminLogin(){var email=el('aemail').value.trim(),p=el('apass').value;if(!email||!p){msg('adminMsg','Email dan password wajib.');return;}msg('adminMsg','Memeriksa admin…','info');try{if(auth.currentUser)await auth.signOut();await auth.signInWithEmailAndPassword(email,p);if(!(await isAdmin())){await auth.signOut();await ensureAnon();msg('adminMsg','Akun ini bukan admin aktif.');return;}admin();}catch(e){try{await ensureAnon();}catch(_){}msg('adminMsg','Login admin gagal: '+(e.code||e.message));}}
@@ -313,7 +339,11 @@ async function admin(){
   examList=sortExamsBySchedule(r[2].docs.map(function(d){return Object.assign({id:d.id},d.data());}));
   attempts=r[3].docs.map(function(d){return Object.assign({id:d.id},d.data());});
  }catch(e){console.warn(e);}
- var upcoming=examList.filter(function(x){return x.archived!==true;}).slice(0,4);
+ var upcoming=examList.filter(function(x){
+   if(x.archived===true||x.active===false)return false;
+   var en=toDate(x.endAt);
+   return !en||en.getTime()>=nowMs();
+  }).slice(0,4);
  var violations=attempts.filter(function(a){return a.completionReason==='left_exam_twice'||a.autoCompleted===true;}).length;
  var upcomingHtml=upcoming.length?upcoming.map(function(x,i){
    var dt=toDate(x.startAt),day=dt?String(dt.getDate()).padStart(2,'0'):'--',mon=dt?dt.toLocaleDateString('id-ID',{month:'short'}).replace('.','').toUpperCase():'';
@@ -409,8 +439,26 @@ async function syncClassesFromStudents(){
   }
 }
 
-async function getClassCredential(id){try{var d=await db.collection('classCredentials').doc(id).get();return d.exists?String(d.data().password||''):'';}catch(e){return '';}}
-async function getStudentCredentials(){var map={};try{var s=await db.collection('studentCredentials').get();s.docs.forEach(function(d){map[d.id]=String(d.data().password||'');});}catch(e){}return map;}
+async function getClassCredential(id){
+ try{
+  var d=await db.collection('classCredentials').doc(id).get();
+  return d.exists?String(d.data().password||''):'';
+ }catch(e){
+  console.error('classCredentials read failed',e);
+  throw e;
+ }
+}
+async function getStudentCredentials(){
+ var map={};
+ try{
+  var s=await db.collection('studentCredentials').get();
+  s.docs.forEach(function(d){map[d.id]=String(d.data().password||'');});
+  return map;
+ }catch(e){
+  console.error('studentCredentials read failed',e);
+  throw e;
+ }
+}
 async function saveClassCredential(id,password){await db.collection('classCredentials').doc(id).set({password:String(password),updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});}
 async function saveStudentCredential(id,password){await db.collection('studentCredentials').doc(id).set({password:String(password),updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});}
 async function classesAdmin(){
@@ -422,7 +470,13 @@ async function classesAdmin(){
    return pakkomAlert('Kelola Kelas gagal dibuka: '+(e && e.message ? e.message : 'gagal sinkronisasi kelas.'));
  }
  var s=await db.collection('classes').get();
- var credSnap=await db.collection('classCredentials').get(),cred={};credSnap.docs.forEach(function(d){cred[d.id]=String(d.data().password||'');});
+ var cred={};
+ try{
+  var credSnap=await db.collection('classCredentials').get();
+  credSnap.docs.forEach(function(d){cred[d.id]=String(d.data().password||'');});
+ }catch(e){
+  return pakkomAlert('Password kelas tidak dapat dimuat. Pastikan Firestore Rules V16.6.2 sudah dipublish. '+(e.code||e.message));
+ }
  var rows=s.docs.sort(function(a,b){return a.id.localeCompare(b.id);}).map(function(d){var x=d.data(),pw=cred[d.id]||'';return '<tr><td><b>'+esc(d.id)+'</b></td><td>'+esc(x.name||d.id)+'</td><td><span class="admin-password">'+(pw?esc(pw):'<span class="muted">Belum tersimpan</span>')+'</span></td><td>'+(x.active===false?'Nonaktif':'Aktif')+'</td><td><button class="btn gray small class-edit" data-id="'+esc(d.id)+'">Edit</button> <button class="btn small '+(x.active===false?'green':'orange')+' class-toggle" data-id="'+esc(d.id)+'" data-active="'+(x.active===false?'0':'1')+'">'+(x.active===false?'Aktifkan':'Nonaktifkan')+'</button></td></tr>';}).join('');
  top('Kelola Kelas','<div class="wrap"><div class="card"><h2>Tambah Kelas</h2><div class="grid"><input id="cid" class="input" placeholder="Kode kelas, contoh 7A"><input id="cname" class="input" placeholder="Nama kelas"><input id="cpass" class="input" value="123456" placeholder="Password kelas"></div><button class="btn green" id="saveClassBtn">Tambah Kelas</button></div><div class="card"><div class="notice"><b>Password kelas</b> hanya ditampilkan kepada admin. Kelas lama yang sebelumnya hanya menyimpan hash akan bertuliskan <b>Belum tersimpan</b>; klik Edit lalu tetapkan password baru agar dapat ditampilkan.</div><div class="table-wrap"><table><thead><tr><th>Kode</th><th>Nama</th><th>Password</th><th>Status</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table></div></div></div>',admin,'Admin');
  el('saveClassBtn').onclick=saveClass;document.querySelectorAll('.class-edit').forEach(function(b){b.onclick=function(){editClass(this.dataset.id);};});document.querySelectorAll('.class-toggle').forEach(function(b){b.onclick=function(){toggleClass(this.dataset.id,this.dataset.active==='1');};});
@@ -440,7 +494,15 @@ async function ensureClassExists(id){
  await ref.set({name:id,passwordHash:await sha256('123456'),active:true,createdFrom:'student-import',createdAt:firebase.firestore.FieldValue.serverTimestamp()});await saveClassCredential(id,'123456');return true;
 }
 
-async function studentsAdmin(){if(!(await isAdmin()))return adminLogin();var s=await db.collection('students').get();window.adminStudentPasswords=await getStudentCredentials();adminStudents=s.docs.map(function(d){return Object.assign({id:d.id},d.data());}).sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''));});var classes=[...new Set(adminStudents.map(function(x){return x.classId;}).filter(Boolean))].sort();top('Kelola Siswa','<div class="wrap"><div class="card"><h2>Tambah Manual</h2><div class="grid"><input id="anIS" class="input" placeholder="NIS"><input id="anName" class="input" placeholder="Nama"><input id="anClass" class="input" placeholder="Kelas"><input id="anPass" class="input" placeholder="Password (default 123456)"></div><button class="btn green" id="addManual">Tambah Siswa</button></div><div class="card"><h2>Upload Excel</h2><p class="muted">Kolom: NIS | Nama | Kelas | Password. Password siswa kosong = 123456. Kelas yang belum ada dibuat otomatis dengan password kelas 123456.</p><input id="excelFile" class="input" type="file" accept=".xlsx,.xls,.csv"><div class="actions"><button class="btn" id="importExcel">Upload Data</button><button class="btn gray" id="templateExcel">Download Template</button></div><div id="importMsg"></div></div><div class="card"><div class="grid"><input id="studentSearch" class="input" placeholder="Cari NIS/nama"><select id="studentFilter"><option value="">Semua kelas</option>'+classes.map(function(c){return '<option>'+esc(c)+'</option>';}).join('')+'</select></div><div class="bulk-bar"><span id="bulkCount">0 dipilih</span><div class="actions"><button class="btn green small" id="bulkApprove" disabled>Approve</button><button class="btn gray small" id="bulkActivate" disabled>Aktifkan</button><button class="btn orange small" id="bulkDeactivate" disabled>Nonaktifkan</button><button class="btn red small" id="bulkDelete" disabled>Hapus</button></div></div><div id="studentTable"></div></div></div>',admin,'Admin');el('addManual').onclick=addStudentManual;el('importExcel').onclick=importExcel;el('templateExcel').onclick=downloadTemplate;el('studentSearch').oninput=renderStudents;el('studentFilter').onchange=renderStudents;el('bulkApprove').onclick=function(){bulkStudents('approve');};el('bulkActivate').onclick=function(){bulkStudents('activate');};el('bulkDeactivate').onclick=function(){bulkStudents('deactivate');};el('bulkDelete').onclick=function(){bulkStudents('delete');};renderStudents();}
+async function studentsAdmin(){
+ if(!(await isAdmin()))return adminLogin();
+ var s=await db.collection('students').get();
+ try{
+  window.adminStudentPasswords=await getStudentCredentials();
+ }catch(e){
+  return pakkomAlert('Password siswa tidak dapat dimuat. Pastikan Firestore Rules V16.6.2 sudah dipublish. '+(e.code||e.message));
+ }
+ adminStudents=s.docs.map(function(d){return Object.assign({id:d.id},d.data());}).sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''));});var classes=[...new Set(adminStudents.map(function(x){return x.classId;}).filter(Boolean))].sort();top('Kelola Siswa','<div class="wrap"><div class="card"><h2>Tambah Manual</h2><div class="grid"><input id="anIS" class="input" placeholder="NIS"><input id="anName" class="input" placeholder="Nama"><input id="anClass" class="input" placeholder="Kelas"><input id="anPass" class="input" placeholder="Password (default 123456)"></div><button class="btn green" id="addManual">Tambah Siswa</button></div><div class="card"><h2>Upload Excel</h2><p class="muted">Kolom: NIS | Nama | Kelas | Password. Password siswa kosong = 123456. Kelas yang belum ada dibuat otomatis dengan password kelas 123456.</p><input id="excelFile" class="input" type="file" accept=".xlsx,.xls,.csv"><div class="actions"><button class="btn" id="importExcel">Upload Data</button><button class="btn gray" id="templateExcel">Download Template</button></div><div id="importMsg"></div></div><div class="card"><div class="grid"><input id="studentSearch" class="input" placeholder="Cari NIS/nama"><select id="studentFilter"><option value="">Semua kelas</option>'+classes.map(function(c){return '<option>'+esc(c)+'</option>';}).join('')+'</select></div><div class="bulk-bar"><span id="bulkCount">0 dipilih</span><div class="actions"><button class="btn green small" id="bulkApprove" disabled>Approve</button><button class="btn gray small" id="bulkActivate" disabled>Aktifkan</button><button class="btn orange small" id="bulkDeactivate" disabled>Nonaktifkan</button><button class="btn red small" id="bulkDelete" disabled>Hapus</button></div></div><div id="studentTable"></div></div></div>',admin,'Admin');el('addManual').onclick=addStudentManual;el('importExcel').onclick=importExcel;el('templateExcel').onclick=downloadTemplate;el('studentSearch').oninput=renderStudents;el('studentFilter').onchange=renderStudents;el('bulkApprove').onclick=function(){bulkStudents('approve');};el('bulkActivate').onclick=function(){bulkStudents('activate');};el('bulkDeactivate').onclick=function(){bulkStudents('deactivate');};el('bulkDelete').onclick=function(){bulkStudents('delete');};renderStudents();}
 function selectedStudentIds(){return Array.prototype.map.call(document.querySelectorAll('.student-check:checked'),function(c){return c.dataset.id;});}
 function updateBulkBar(){var ids=selectedStudentIds(),c=el('bulkCount');if(c)c.textContent=ids.length+' dipilih';if(el('bulkApprove'))el('bulkApprove').disabled=!ids.length;if(el('bulkDelete'))el('bulkDelete').disabled=!ids.length;if(el('bulkActivate'))el('bulkActivate').disabled=!ids.length;if(el('bulkDeactivate'))el('bulkDeactivate').disabled=!ids.length;}
 function renderStudents(){var q=(el('studentSearch')?el('studentSearch').value:'').toLowerCase().trim(),f=el('studentFilter')?el('studentFilter').value:'';var rows=adminStudents.filter(function(x){return (!f||x.classId===f)&&(!q||String(x.nis||'').toLowerCase().includes(q)||String(x.name||'').toLowerCase().includes(q));});el('studentTable').innerHTML='<p class="muted">'+rows.length+' siswa • '+rows.filter(function(x){return x.approved!==true;}).length+' menunggu approval</p><div class="table-wrap"><table class="table"><tr><th><input type="checkbox" id="checkAllStudents" aria-label="Pilih semua"></th><th>NIS</th><th>Nama</th><th>Kelas</th><th>Password</th><th>Approval</th><th>Status</th><th>Aksi</th></tr>'+rows.map(function(x){return '<tr><td><input type="checkbox" class="student-check" data-id="'+esc(x.id)+'"></td><td>'+esc(x.nis)+'</td><td>'+esc(x.name)+'</td><td>'+esc(x.classId)+'</td><td>'+(x.passwordAdminVisible===false?'<span class="muted">Diubah siswa</span>':((window.adminStudentPasswords||{})[x.id]?'<span class="admin-password">'+esc((window.adminStudentPasswords||{})[x.id])+'</span>':'<span class="muted">Belum tersimpan</span>'))+'</td><td>'+(x.approved===true?'<span class="pill green">Disetujui</span>':'<span class="pill orange">Menunggu</span>')+'</td><td>'+(x.active===true?'Aktif':'Nonaktif')+'</td><td><div class="actions">'+(x.approved!==true?'<button class="btn green small approve" data-id="'+esc(x.id)+'">Approve</button>':'')+'<button class="btn gray small reset" data-id="'+esc(x.id)+'">Reset Password</button><button class="btn orange small toggle" data-id="'+esc(x.id)+'" data-active="'+(x.active===true?'1':'0')+'">'+(x.active===true?'Nonaktifkan':'Aktifkan')+'</button><button class="btn red small delete-student" data-id="'+esc(x.id)+'" data-name="'+esc(x.name||x.nis)+'">Hapus</button></div></td></tr>';}).join('')+'</table></div>';var all=el('checkAllStudents');if(all)all.onchange=function(){document.querySelectorAll('.student-check').forEach(function(c){c.checked=all.checked;});updateBulkBar();};document.querySelectorAll('.student-check').forEach(function(c){c.onchange=updateBulkBar;});document.querySelectorAll('.approve').forEach(function(b){b.onclick=function(){approveStudent(b.dataset.id);};});document.querySelectorAll('.reset').forEach(function(b){b.onclick=function(){resetStudent(b.dataset.id);};});document.querySelectorAll('.toggle').forEach(function(b){b.onclick=function(){toggleStudent(b.dataset.id,b.dataset.active==='1');};});document.querySelectorAll('.delete-student').forEach(function(b){b.onclick=function(){deleteStudent(b.dataset.id,b.dataset.name);};});updateBulkBar();}
@@ -548,7 +610,10 @@ async function examsAdmin(){
  var palette=['blue','green','purple','orange'];
  var cards=list.map(function(x,i){
   var st=toDate(x.startAt),status=examAdminStatus(x),day=st?String(st.getDate()).padStart(2,'0'):'--',mon=st?st.toLocaleDateString('id-ID',{month:'short'}).replace('.','').toUpperCase():'';
-  var allowed=x.allowedClasses||[],participants=students.filter(function(s){return !allowed.length||allowed.indexOf(String(s.classId||'').toUpperCase())>=0;}).length;
+  var allowed=x.allowedClasses||[],participants=students.filter(function(s){
+  if(s.approved!==true||s.active!==true)return false;
+  return !allowed.length||allowed.indexOf(String(s.classId||'').toUpperCase())>=0;
+ }).length;
   var classes=allowed.join(', ')||'Semua kelas';
   return '<article class="exam-schedule-card"><div class="schedule-date '+palette[i%4]+'"><b>'+esc(day)+'</b><small>'+esc(mon)+'</small></div><div class="schedule-main"><div class="schedule-title-row"><div><h3>'+esc(x.name||'Ujian')+'</h3><p>'+esc(x.subject||'Ujian online')+'</p></div><button class="kebab exam-kebab" aria-label="Aksi ujian" data-id="'+esc(x.id)+'" data-active="'+(x.active===false?'0':'1')+'" data-archived="'+(x.archived===true?'1':'0')+'">⋮</button></div><div class="schedule-lines"><span>'+uiIcon('calendar')+esc(st?st.toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'}):'Tanggal belum diatur')+'</span><span>'+uiIcon('clock')+esc(timeOnly(x.startAt))+' - '+esc(timeOnly(x.endAt))+'</span><span>'+uiIcon('people')+participants+' peserta</span></div><div class="schedule-foot"><span class="pill '+status.cls+'">'+status.label+'</span><span class="class-list">'+esc(classes)+'</span></div></div></article>';
  }).join('');
@@ -583,7 +648,7 @@ async function duplicateExam(id){
 async function editExam(id){if(!(await isAdmin()))return adminLogin();try{var pair=await Promise.all([db.collection('examPublic').doc(id).get(),db.collection('examSecrets').doc(id).get()]);if(!pair[0].exists)return pakkomAlert('Ujian tidak ditemukan.');var x=pair[0].data(),sd=toDate(x.startAt),ed=toDate(x.endAt),date=sd?(sd.getFullYear()+'-'+String(sd.getMonth()+1).padStart(2,'0')+'-'+String(sd.getDate()).padStart(2,'0')):'',st=sd?(String(sd.getHours()).padStart(2,'0')+':'+String(sd.getMinutes()).padStart(2,'0')):'',en=ed?(String(ed.getHours()).padStart(2,'0')+':'+String(ed.getMinutes()).padStart(2,'0')):'';top('Edit Ujian','<div class="wrap"><div class="card"><h2>'+esc(x.name||'Edit Ujian')+'</h2><div class="form-grid-2"><div class="field"><label>Nama Ujian</label><input id="xname" class="input" value="'+esc(x.name||'')+'"></div><div class="field"><label>Mata Pelajaran</label><input id="xsub" class="input" value="'+esc(x.subject||'')+'"></div></div><label>Link Ujian</label><input id="xurl" class="input" value="'+esc(x.url||'')+'"><label>Kelas Peserta</label><input id="xclass" class="input" value="'+esc((x.allowedClasses||[]).join(','))+'"><div class="form-grid-3"><div class="field"><label>Tanggal</label><input id="xdate" class="input" type="date" value="'+esc(date)+'"></div><div class="field"><label>Jam Mulai</label><input id="xstart" class="input" type="time" value="'+esc(st)+'"></div><div class="field"><label>Jam Selesai</label><input id="xend" class="input" type="time" value="'+esc(en)+'"></div></div><label>PIN Baru <span class="muted">(kosongkan jika tidak diganti)</span></label><input id="xpin" class="input" type="password" inputmode="numeric" placeholder="PIN lama tidak ditampilkan"><div class="actions"><button class="btn green" id="saveEditExam">Simpan Perubahan</button><button class="btn gray" id="cancelEditExam">Batal</button></div><div id="editExamMsg"></div></div></div>',examsAdmin,'Kelola Ujian');el('saveEditExam').onclick=function(){saveExamEdit(id);};el('cancelEditExam').onclick=examsAdmin;}catch(e){pakkomAlert('Ujian tidak dapat dibuka: '+(e.code||e.message));}}
 async function saveExamEdit(id){var name=el('xname').value.trim(),sub=el('xsub').value.trim(),url=el('xurl').value.trim(),classes=el('xclass').value.split(',').map(function(v){return v.trim().toUpperCase();}).filter(Boolean),date=el('xdate').value,st=el('xstart').value,en=el('xend').value,pin=el('xpin').value.trim();if(!name||!sub||!https(url)||!date||!st||!en)return msg('editExamMsg','Lengkapi nama, pelajaran, link HTTPS, tanggal, dan waktu.');var start=new Date(date+'T'+st),end=new Date(date+'T'+en);if(end<=start)return msg('editExamMsg','Jam selesai harus setelah jam mulai.');try{await db.collection('examPublic').doc(id).update({name:name,subject:sub,url:url,allowedClasses:classes,startAt:start,endAt:end,scheduleDate:date,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});if(pin)await db.collection('examSecrets').doc(id).set({pinHash:await sha256(pin),updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});await pakkomAlert('Detail ujian berhasil diperbarui.');examsAdmin();}catch(e){msg('editExamMsg','Perubahan gagal disimpan: '+(e.code||e.message));}}
 async function toggleExam(id,a){await db.collection('examPublic').doc(id).update({active:!a,archived:false});examsAdmin();}
-async function archiveExam(id,isArchived){var ok=await pakkomConfirm((isArchived?'Keluarkan ujian ini dari arsip?':'Arsipkan ujian ini? Ujian tidak akan tampil di portal siswa, tetapi data pengerjaan tetap disimpan.'));if(!ok)return;await db.collection('examPublic').doc(id).update({archived:!isArchived,active:isArchived?false:false,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});examsAdmin();}
+async function archiveExam(id,isArchived){var ok=await pakkomConfirm((isArchived?'Keluarkan ujian ini dari arsip?':'Arsipkan ujian ini? Ujian tidak akan tampil di portal siswa, tetapi data pengerjaan tetap disimpan.'));if(!ok)return;await db.collection('examPublic').doc(id).update({archived:!isArchived,active:isArchived?true:false,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});examsAdmin();}
 async function deleteExam(id){var ok=await pakkomConfirm('Hapus ujian ini? Detail ujian, PIN, dan seluruh status pengerjaan ujian ini akan dihapus.');if(!ok)return;try{await db.collection('examPublic').doc(id).delete();await db.collection('examSecrets').doc(id).delete().catch(function(){});var q=await db.collection('examAttempts').where('examId','==',id).get();for(var i=0;i<q.docs.length;i+=400){var batch=db.batch();q.docs.slice(i,i+400).forEach(function(d){batch.delete(d.ref);});await batch.commit();}examsAdmin();}catch(e){pakkomAlert('Ujian gagal dihapus: '+(e.code||e.message));}}
 
 function showNetworkState(offline){
