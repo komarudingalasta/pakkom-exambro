@@ -1,4 +1,5 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -16,29 +17,29 @@ service cloud.firestore {
 
     match /students/{studentId} {
       allow read: if request.auth != null;
-
-      // Admin boleh membuat siswa manual maupun melalui import Excel/CSV.
-      // Siswa biasa hanya boleh membuat pendaftaran mandiri dalam status pending/nonaktif.
       allow create: if isAdmin()
         || (request.auth != null
           && request.resource.data.approved == false
           && request.resource.data.active == false
           && request.resource.data.registrationSource == "self");
-
-      allow delete: if isAdmin();
-
-      // V16 Lite: siswa dapat mengganti sandi setelah login aplikasi.
-      // Arsitektur Lite belum mengikat dokumen siswa ke Firebase UID secara permanen,
-      // sehingga versi Secure/Cloud Functions tetap direkomendasikan untuk produksi penuh.
       allow update: if isAdmin()
         || (request.auth != null
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['passwordHash', 'password', 'passwordUpdatedAt']));
+            .hasOnly(['passwordHash','password','passwordUpdatedAt','passwordAdminVisible']));
+      allow delete: if isAdmin();
+    }
+
+    match /studentCredentials/{studentId} {
+      allow read, create, update, delete: if isAdmin();
     }
 
     match /classes/{classId} {
       allow read: if request.auth != null;
       allow create, update, delete: if isAdmin();
+    }
+
+    match /classCredentials/{classId} {
+      allow read, create, update, delete: if isAdmin();
     }
 
     match /examPublic/{examId} {
@@ -48,16 +49,14 @@ service cloud.firestore {
 
     match /examSecrets/{examId} {
       allow read: if request.auth != null;
-      allow write: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
     match /settings/{settingId} {
       allow read: if request.auth != null;
-      allow write: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
-    // Sinkronisasi jam terhadap Firestore server time.
-    // Setiap user hanya dapat menulis dokumen dengan ID UID Firebase miliknya.
     match /timeSync/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow create, update: if request.auth != null
@@ -69,18 +68,13 @@ service cloud.firestore {
 
     match /examAttempts/{attemptId} {
       allow read: if request.auth != null;
-
       allow create: if request.auth != null
         && request.resource.data.studentId is string
         && request.resource.data.examId is string
         && request.resource.data.createdByAuthUid == request.auth.uid
         && (request.resource.data.status == "in_progress"
-            || request.resource.data.status == "completed");
+          || request.resource.data.status == "completed");
 
-      // Admin dapat mengelola/reset attempt.
-      // Siswa pemilik sesi dapat:
-      // 1) menambahkan violationCount/violationLog saat masih in_progress;
-      // 2) menyelesaikan attempt miliknya.
       allow update: if isAdmin()
         || (request.auth != null
           && resource.data.createdByAuthUid == request.auth.uid
@@ -89,15 +83,19 @@ service cloud.firestore {
           && request.resource.data.createdByAuthUid == resource.data.createdByAuthUid
           && resource.data.status == "in_progress"
           && (
-            (
-              request.resource.data.status == "in_progress"
+            (request.resource.data.status == "in_progress"
               && request.resource.data.diff(resource.data).affectedKeys()
-                .hasOnly(['violationCount', 'violationLog', 'updatedAt'])
-            )
+                .hasOnly(['violationCount','violationLog','updatedAt']))
             || request.resource.data.status == "completed"
           ));
-
       allow delete: if isAdmin();
+    }
+
+    // V17: nilai ujian.
+    // Penulisan/publikasi hanya admin.
+    match /examScores/{scoreId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if isAdmin();
     }
 
     match /{document=**} {
@@ -105,14 +103,3 @@ service cloud.firestore {
     }
   }
 }
-
-    // Password tampilan admin disimpan terpisah dari dokumen siswa/kelas.
-    // Hanya admin yang boleh membaca atau menulis koleksi ini.
-    match /studentCredentials/{studentId} {
-      allow read, create, update, delete: if isAdmin();
-    }
-
-    match /classCredentials/{classId} {
-      allow read, create, update, delete: if isAdmin();
-    }
-
