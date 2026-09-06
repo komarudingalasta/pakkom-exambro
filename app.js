@@ -178,7 +178,7 @@ async function home(){
 }
 function renderHome(note){
  var logo=branding.logoDataUrl?'<div class="home-brand-logo uploaded"><img src="'+esc(branding.logoDataUrl)+'" alt="Logo"></div>':'<div class="home-brand-logo">P</div>';
- app.innerHTML='<main class="home-page simple-home"><section class="simple-login-shell"><div class="simple-brand">'+logo+'<div><h1>'+esc(brandName())+'</h1>'+(branding.schoolName?'<p>'+esc(branding.schoolName)+'</p>':'')+'</div></div><div class="card simple-login-card"><h2>Masuk</h2><p class="muted">Gunakan NIS siswa atau email admin.</p>'+(note?'<div class="notice">'+esc(note)+'</div>':'')+'<label>NIS / Email Admin</label><input id="unifiedAccount" class="input" autocomplete="username" placeholder="NIS atau email"><label>Password</label><input id="unifiedPass" class="input" type="password" autocomplete="current-password" placeholder="Password"><button class="btn block" id="unifiedLogin">Masuk</button><button class="btn gray block" id="newStudent" style="margin-top:8px">Daftar Siswa Baru</button><div id="unifiedMsg"></div></div><div class="home-version">PakKom Exambro V17.0.1.1</div></section></main>';
+ app.innerHTML='<main class="home-page simple-home"><section class="simple-login-shell"><div class="simple-brand">'+logo+'<div><h1>'+esc(brandName())+'</h1>'+(branding.schoolName?'<p>'+esc(branding.schoolName)+'</p>':'')+'</div></div><div class="card simple-login-card"><h2>Masuk</h2><p class="muted">Gunakan NIS siswa atau email admin.</p>'+(note?'<div class="notice">'+esc(note)+'</div>':'')+'<label>NIS / Email Admin</label><input id="unifiedAccount" class="input" autocomplete="username" placeholder="NIS atau email"><label>Password</label><input id="unifiedPass" class="input" type="password" autocomplete="current-password" placeholder="Password"><button class="btn block" id="unifiedLogin">Masuk</button><button class="btn gray block" id="newStudent" style="margin-top:8px">Daftar Siswa Baru</button><div id="unifiedMsg"></div></div><div class="home-version">PakKom Exambro V18.0.1</div></section></main>';
  el('unifiedLogin').onclick=doUnifiedLogin;el('newStudent').onclick=classGate;el('unifiedPass').onkeydown=function(e){if(e.key==='Enter')doUnifiedLogin();};
 }
 async function doUnifiedLogin(){
@@ -212,7 +212,7 @@ async function loadClasses(){
 async function classGate(){
  app.innerHTML='<div class="login card"><h1>Masuk Kelas</h1><label>Kelas</label><select id="kelas"><option>Memuat…</option></select><label>Password Kelas</label><input id="kpw" class="input" type="password"><button class="btn block" id="goClass">Lanjut</button><button class="btn gray block" id="backHome" style="margin-top:8px">Kembali</button><div id="classMsg"></div></div>';
  el('backHome').onclick=home;el('goClass').onclick=verifyClass;
- var ok=await loadClasses();var s=el('kelas');if(ok&&classList.length)s.innerHTML='<option value="">-- Pilih kelas --</option>'+classList.map(function(x){return '<option value="'+esc(x.id)+'">'+esc(x.name||x.id)+'</option>';}).join('');else{s.innerHTML='<option value="">-- Kelas belum tersedia --</option>';msg('classMsg','Kelas gagal dimuat. Pastikan Anonymous Authentication aktif dan Firestore Rules V17.0.1 sudah dipublish.');}
+ var ok=await loadClasses();var s=el('kelas');if(ok&&classList.length)s.innerHTML='<option value="">-- Pilih kelas --</option>'+classList.map(function(x){return '<option value="'+esc(x.id)+'">'+esc(x.name||x.id)+'</option>';}).join('');else{s.innerHTML='<option value="">-- Kelas belum tersedia --</option>';msg('classMsg','Kelas gagal dimuat. Pastikan Anonymous Authentication aktif dan Firestore Rules V18.0 sudah dipublish.');}
 }
 async function verifyClass(){
  var id=el('kelas').value,p=el('kpw').value;if(!id||!p){msg('classMsg','Pilih kelas dan masukkan password.');return;}
@@ -363,7 +363,7 @@ async function admin(){
    '<section class="card clean-card"><div class="card-headline"><div><h2>Jadwal Ujian</h2><p class="muted">Akses cepat ke jadwal yang tersedia.</p></div><button class="text-action" id="seeAllExam">Lihat semua</button></div><div class="dash-exam-list">'+upcomingHtml+'</div></section>'+
    '<section class="card clean-card admin-shortcuts"><div class="card-headline"><div><h2>Menu Admin</h2><p class="muted">Pengaturan dan riwayat.</p></div></div>'+
     '<button class="shortcut-row" id="mResult"><span>'+uiIcon('result')+'</span><span><b>Hasil Ujian</b><small>Status pengerjaan & akses ulang</small></span><span>›</span></button>'+
-    '<button class="shortcut-row" id="mScores"><span>'+uiIcon('exam')+'</span><span><b>Kelola Nilai</b><small>Input, import & publikasi nilai</small></span><span>›</span></button>'+
+    '<button class="shortcut-row" id="mScores"><span>'+uiIcon('exam')+'</span><span><b>Kelola Nilai</b><small>Input, import & publikasi nilai</small></span><span>›</span></button>'+'<button class="shortcut-row" id="mQuestions"><span>'+uiIcon('result')+'</span><span><b>Bank Soal</b><small>Buat soal & media gambar</small></span><span>›</span></button>'+
     '<button class="shortcut-row" id="mBrand"><span>'+uiIcon('settings')+'</span><span><b>Identitas Sekolah</b><small>Nama aplikasi, sekolah & logo</small></span><span>›</span></button>'+
     '<div class="shortcut-row static"><span class="status-dot green"></span><span><b>Sinkronisasi sistem</b><small>Waktu server dan database aktif</small></span><span class="pill green">Aktif</span></div>'+
     '<div class="shortcut-row static"><span class="status-dot '+(violations?'red':'green')+'"></span><span><b>Pelanggaran tercatat</b><small>Ujian dihentikan otomatis</small></span><strong>'+violations+'</strong></div>'+
@@ -373,16 +373,16 @@ async function admin(){
  '</main>';
  top(brandName()+' — Admin',body,adminLogout,'Keluar');
  el('mClass').onclick=classesAdmin;el('mStudent').onclick=studentsAdmin;el('mExam').onclick=examsAdmin;el('mMonitor').onclick=examControlCenter;
- el('mResult').onclick=examResultsAdmin;el('mScores').onclick=scoresAdmin;el('mBrand').onclick=brandingAdmin;el('seeAllExam').onclick=examsAdmin;
+ el('mResult').onclick=examResultsAdmin;el('mScores').onclick=scoresAdmin;el('mQuestions').onclick=questionBankAdmin;el('mBrand').onclick=brandingAdmin;el('seeAllExam').onclick=examsAdmin;
  document.querySelectorAll('[data-exam-open]').forEach(function(b){b.onclick=examsAdmin;});
  if(el('adminQuickMenu'))el('adminQuickMenu').onclick=openAdminQuickMenu;
 }
 function openAdminQuickMenu(){
- var d=document.createElement('div');d.className='mobile-sheet-backdrop';d.innerHTML='<div class="mobile-sheet admin-nav-sheet"><div class="sheet-handle"></div><div class="sheet-title-row"><div><h2>Menu Admin</h2><p class="muted">Pilih menu pengelolaan.</p></div><button class="sheet-close" aria-label="Tutup">×</button></div><button data-go="class">'+uiIcon('classes')+'<span><b>Kelas</b><small>Data dan password kelas</small></span><span>›</span></button><button data-go="student">'+uiIcon('students')+'<span><b>Siswa</b><small>Akun, import, approval</small></span><span>›</span></button><button data-go="exam">'+uiIcon('exam')+'<span><b>Ujian</b><small>Jadwal dan pengaturan</small></span><span>›</span></button><button data-go="monitor">'+uiIcon('monitor')+'<span><b>Control Center</b><small>Monitoring real-time</small></span><span>›</span></button><button data-go="result">'+uiIcon('result')+'<span><b>Hasil Ujian</b><small>Riwayat pengerjaan</small></span><span>›</span></button><button data-go="scores">'+uiIcon('exam')+'<span><b>Kelola Nilai</b><small>Input, import & publikasi</small></span><span>›</span></button><button data-go="brand">'+uiIcon('settings')+'<span><b>Identitas</b><small>Logo dan nama sekolah</small></span><span>›</span></button><button class="sheet-logout" data-go="logout">Keluar</button></div>';
+ var d=document.createElement('div');d.className='mobile-sheet-backdrop';d.innerHTML='<div class="mobile-sheet admin-nav-sheet"><div class="sheet-handle"></div><div class="sheet-title-row"><div><h2>Menu Admin</h2><p class="muted">Pilih menu pengelolaan.</p></div><button class="sheet-close" aria-label="Tutup">×</button></div><button data-go="class">'+uiIcon('classes')+'<span><b>Kelas</b><small>Data dan password kelas</small></span><span>›</span></button><button data-go="student">'+uiIcon('students')+'<span><b>Siswa</b><small>Akun, import, approval</small></span><span>›</span></button><button data-go="exam">'+uiIcon('exam')+'<span><b>Ujian</b><small>Jadwal dan pengaturan</small></span><span>›</span></button><button data-go="monitor">'+uiIcon('monitor')+'<span><b>Control Center</b><small>Monitoring real-time</small></span><span>›</span></button><button data-go="result">'+uiIcon('result')+'<span><b>Hasil Ujian</b><small>Riwayat pengerjaan</small></span><span>›</span></button><button data-go="scores">'+uiIcon('exam')+'<span><b>Kelola Nilai</b><small>Input, import & publikasi</small></span><span>›</span></button><button data-go="questions">'+uiIcon('result')+'<span><b>Bank Soal</b><small>Buat soal & gambar</small></span><span>›</span></button><button data-go="brand">'+uiIcon('settings')+'<span><b>Identitas</b><small>Logo dan nama sekolah</small></span><span>›</span></button><button class="sheet-logout" data-go="logout">Keluar</button></div>';
  document.body.appendChild(d);
  function close(){d.remove();}
  d.onclick=function(e){if(e.target===d)close();};d.querySelector('.sheet-close').onclick=close;
- var go={class:classesAdmin,student:studentsAdmin,exam:examsAdmin,monitor:examControlCenter,result:examResultsAdmin,scores:scoresAdmin,brand:brandingAdmin,logout:adminLogout};
+ var go={class:classesAdmin,student:studentsAdmin,exam:examsAdmin,monitor:examControlCenter,result:examResultsAdmin,scores:scoresAdmin,questions:questionBankAdmin,brand:brandingAdmin,logout:adminLogout};
  d.querySelectorAll('[data-go]').forEach(function(b){b.onclick=function(){var fn=go[b.dataset.go];close();if(fn)fn();};});
 }
 async function adminLogout(){clearSession();try{await auth.signOut();await ensureAnon();}catch(e){}renderHome('');}
@@ -476,7 +476,7 @@ async function classesAdmin(){
   var credSnap=await db.collection('classCredentials').get();
   credSnap.docs.forEach(function(d){cred[d.id]=String(d.data().password||'');});
  }catch(e){
-  return pakkomAlert('Password kelas tidak dapat dimuat. Pastikan Firestore Rules V17.0.1 sudah dipublish. '+(e.code||e.message));
+  return pakkomAlert('Password kelas tidak dapat dimuat. Pastikan Firestore Rules V18.0 sudah dipublish. '+(e.code||e.message));
  }
  var rows=s.docs.sort(function(a,b){return a.id.localeCompare(b.id);}).map(function(d){var x=d.data(),pw=cred[d.id]||'';return '<tr><td><b>'+esc(d.id)+'</b></td><td>'+esc(x.name||d.id)+'</td><td><span class="admin-password">'+(pw?esc(pw):'<span class="muted">Belum tersimpan</span>')+'</span></td><td>'+(x.active===false?'Nonaktif':'Aktif')+'</td><td><button class="btn gray small class-edit" data-id="'+esc(d.id)+'">Edit</button> <button class="btn small '+(x.active===false?'green':'orange')+' class-toggle" data-id="'+esc(d.id)+'" data-active="'+(x.active===false?'0':'1')+'">'+(x.active===false?'Aktifkan':'Nonaktifkan')+'</button></td></tr>';}).join('');
  top('Kelola Kelas','<div class="wrap"><div class="card"><h2>Tambah Kelas</h2><div class="grid"><input id="cid" class="input" placeholder="Kode kelas, contoh 7A"><input id="cname" class="input" placeholder="Nama kelas"><input id="cpass" class="input" value="123456" placeholder="Password kelas"></div><button class="btn green" id="saveClassBtn">Tambah Kelas</button></div><div class="card"><div class="notice"><b>Password kelas</b> hanya ditampilkan kepada admin. Kelas lama yang sebelumnya hanya menyimpan hash akan bertuliskan <b>Belum tersimpan</b>; klik Edit lalu tetapkan password baru agar dapat ditampilkan.</div><div class="table-wrap"><table><thead><tr><th>Kode</th><th>Nama</th><th>Password</th><th>Status</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table></div></div></div>',admin,'Admin');
@@ -501,7 +501,7 @@ async function studentsAdmin(){
  try{
   window.adminStudentPasswords=await getStudentCredentials();
  }catch(e){
-  return pakkomAlert('Password siswa tidak dapat dimuat. Pastikan Firestore Rules V17.0.1 sudah dipublish. '+(e.code||e.message));
+  return pakkomAlert('Password siswa tidak dapat dimuat. Pastikan Firestore Rules V18.0 sudah dipublish. '+(e.code||e.message));
  }
  adminStudents=s.docs.map(function(d){return Object.assign({id:d.id},d.data());}).sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''));});var classes=[...new Set(adminStudents.map(function(x){return x.classId;}).filter(Boolean))].sort();top('Kelola Siswa','<div class="wrap"><div class="card"><h2>Tambah Manual</h2><div class="grid"><input id="anIS" class="input" placeholder="NIS"><input id="anName" class="input" placeholder="Nama"><input id="anClass" class="input" placeholder="Kelas"><input id="anPass" class="input" placeholder="Password (default 123456)"></div><button class="btn green" id="addManual">Tambah Siswa</button></div><div class="card"><h2>Upload Excel</h2><p class="muted">Kolom: NIS | Nama | Kelas | Password. Password siswa kosong = 123456. Kelas yang belum ada dibuat otomatis dengan password kelas 123456.</p><input id="excelFile" class="input" type="file" accept=".xlsx,.xls,.csv"><div class="actions"><button class="btn" id="importExcel">Upload Data</button><button class="btn gray" id="templateExcel">Download Template</button></div><div id="importMsg"></div></div><div class="card"><div class="grid"><input id="studentSearch" class="input" placeholder="Cari NIS/nama"><select id="studentFilter"><option value="">Semua kelas</option>'+classes.map(function(c){return '<option>'+esc(c)+'</option>';}).join('')+'</select></div><div class="bulk-bar"><span id="bulkCount">0 dipilih</span><div class="actions"><button class="btn green small" id="bulkApprove" disabled>Approve</button><button class="btn gray small" id="bulkActivate" disabled>Aktifkan</button><button class="btn orange small" id="bulkDeactivate" disabled>Nonaktifkan</button><button class="btn red small" id="bulkDelete" disabled>Hapus</button></div></div><div id="studentTable"></div></div></div>',admin,'Admin');el('addManual').onclick=addStudentManual;el('importExcel').onclick=importExcel;el('templateExcel').onclick=downloadTemplate;el('studentSearch').oninput=renderStudents;el('studentFilter').onchange=renderStudents;el('bulkApprove').onclick=function(){bulkStudents('approve');};el('bulkActivate').onclick=function(){bulkStudents('activate');};el('bulkDeactivate').onclick=function(){bulkStudents('deactivate');};el('bulkDelete').onclick=function(){bulkStudents('delete');};renderStudents();}
 function selectedStudentIds(){return Array.prototype.map.call(document.querySelectorAll('.student-check:checked'),function(c){return c.dataset.id;});}
@@ -680,6 +680,95 @@ async function importScoreFile(ev){var eid=el('scoreExam').value;if(!eid){ev.tar
 async function bulkPublishScores(flag){var eid=el('scoreExam').value;if(!eid)return pakkomAlert('Pilih ujian.');var q=await db.collection('examScores').where('examId','==',eid).get();if(q.empty)return pakkomAlert('Belum ada nilai.');if(!confirm((flag?'Publikasikan ':'Jadikan Draft ')+q.size+' nilai?'))return;for(var i=0;i<q.docs.length;i+=400){var b=db.batch();q.docs.slice(i,i+400).forEach(function(d){b.update(d.ref,{published:flag,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});});await b.commit();}scoresAdmin();}
 function exportScores(){var c=window._scoreCtx||{},eid=el('scoreExam').value;if(!eid)return pakkomAlert('Pilih ujian.');var exam=c.exams.find(function(x){return x.id===eid;}),rows=(c.scores||[]).filter(function(x){return x.examId===eid;}).map(function(x){return {'NIS':x.nis,'Nama':x.studentName,'Kelas':x.classId,'Nilai':x.score,'Keterangan':x.note||'','Status':x.published?'Dipublikasikan':'Draft'};});if(!rows.length)return pakkomAlert('Belum ada nilai.');workbookDownload('Rekap-Nilai-'+String(exam.name||'Ujian').replace(/[^\w\-]+/g,'-')+'.xlsx','Nilai',rows);}
 async function studentScores(){if(!state.student)return home();try{var q=await db.collection('examScores').where('studentId','==',state.student.id).get(),list=q.docs.map(function(d){return Object.assign({id:d.id},d.data());}).filter(function(x){return x.published===true;});var cards=list.map(function(x){return '<article class="student-score-card"><div><span class="eyebrow">'+esc(x.subject||'UJIAN')+'</span><h3>'+esc(x.examName||'Ujian')+'</h3><p>'+esc(x.note||'Nilai telah dipublikasikan')+'</p></div><div class="score-number">'+esc(x.score)+'</div></article>';}).join('')||'<div class="empty">Belum ada nilai yang dipublikasikan.</div>';top('Nilai Saya','<main class="wrap student-scores"><div class="page-title-row"><div><h1>Nilai Saya</h1><p class="muted">'+esc(state.student.name)+' • Kelas '+esc(state.classId)+'</p></div></div><section class="score-card-grid">'+cards+'</section></main>',studentDashboard,'Dashboard');}catch(e){pakkomAlert('Nilai gagal dimuat: '+(e.code||e.message));}}
+
+
+/* ======================================================================
+   V18 — Quiz Builder / Bank Soal + External Media Upload
+   ====================================================================== */
+var QUESTION_MEDIA_ENDPOINT_KEY='pakkomQuestionMediaEndpoint';
+
+function getQuestionMediaEndpoint(){
+ return String(localStorage.getItem(QUESTION_MEDIA_ENDPOINT_KEY)||'').trim();
+}
+function saveQuestionMediaEndpoint(){
+ var v=el('questionMediaEndpoint').value.trim();
+ if(v&&!https(v))return pakkomAlert('Endpoint Apps Script harus menggunakan HTTPS.');
+ if(v)localStorage.setItem(QUESTION_MEDIA_ENDPOINT_KEY,v);else localStorage.removeItem(QUESTION_MEDIA_ENDPOINT_KEY);
+ pakkomAlert('Pengaturan media tersimpan di perangkat admin ini.');
+}
+async function compressQuestionImage(file){
+ return new Promise(function(resolve,reject){
+  var img=new Image(),url=URL.createObjectURL(file);
+  img.onload=function(){
+   try{
+    var max=1200,scale=Math.min(1,max/Math.max(img.width,img.height)),w=Math.max(1,Math.round(img.width*scale)),h=Math.max(1,Math.round(img.height*scale));
+    var c=document.createElement('canvas');c.width=w;c.height=h;var ctx=c.getContext('2d');ctx.drawImage(img,0,0,w,h);
+    c.toBlob(function(blob){URL.revokeObjectURL(url);if(!blob)return reject(new Error('Kompresi gambar gagal.'));resolve(blob);},'image/webp',0.78);
+   }catch(e){URL.revokeObjectURL(url);reject(e);}
+  };
+  img.onerror=function(){URL.revokeObjectURL(url);reject(new Error('File gambar tidak dapat dibaca.'));};
+  img.src=url;
+ });
+}
+async function uploadQuestionImage(){
+ var f=el('questionImageFile').files&&el('questionImageFile').files[0];if(!f)return pakkomAlert('Pilih gambar terlebih dahulu.');
+ var endpoint=getQuestionMediaEndpoint();if(!endpoint)return pakkomAlert('Masukkan URL Web App Google Apps Script pada Pengaturan Media terlebih dahulu.');
+ try{
+  el('questionUploadMsg').innerHTML='<div class="notice">Mengompresi dan mengupload gambar...</div>';
+  var blob=await compressQuestionImage(f),reader=new FileReader();
+  var base64=await new Promise(function(resolve,reject){reader.onload=function(){resolve(String(reader.result).split(',')[1]);};reader.onerror=reject;reader.readAsDataURL(blob);});
+  var payload={action:'uploadQuestionImage',filename:'question-'+Date.now()+'.webp',mimeType:'image/webp',base64:base64};
+  var res=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)});
+  var data=await res.json();if(!data.ok||!data.url)throw new Error(data.error||'URL gambar tidak diterima.');
+  el('questionImageUrl').value=data.url;el('questionImagePreview').innerHTML='<img src="'+esc(data.url)+'" alt="Preview gambar soal">';
+  el('questionUploadMsg').innerHTML='<div class="notice success">Gambar berhasil diupload. Firestore hanya menyimpan URL.</div>';
+ }catch(e){el('questionUploadMsg').innerHTML='';pakkomAlert('Upload gambar gagal: '+(e.message||e));}
+}
+function previewQuestionImage(){
+ var u=el('questionImageUrl').value.trim();el('questionImagePreview').innerHTML=u&&https(u)?'<img src="'+esc(u)+'" alt="Preview gambar soal">':'';
+}
+function questionTypeFields(type,data){
+ data=data||{};var opts=data.options||['','','',''];
+ if(type==='multiple_choice')return '<div class="field"><label>Pilihan Jawaban</label><div class="option-editor">'+opts.map(function(x,i){return '<label class="option-edit-row"><input type="radio" name="correctOption" value="'+i+'" '+(Number(data.correctIndex)===i?'checked':'')+'><span>'+String.fromCharCode(65+i)+'</span><input class="input q-option" value="'+esc(x)+'" placeholder="Pilihan '+String.fromCharCode(65+i)+'"></label>';}).join('')+'</div></div>';
+ if(type==='true_false')return '<div class="field"><label>Kunci Jawaban</label><select id="qTrueFalse" class="input"><option value="true" '+(data.answer==='true'?'selected':'')+'>Benar</option><option value="false" '+(data.answer==='false'?'selected':'')+'>Salah</option></select></div>';
+ if(type==='short_answer')return '<div class="field"><label>Kunci Jawaban Singkat</label><input id="qShortAnswer" class="input" value="'+esc(data.answer||'')+'" placeholder="Jawaban yang dianggap benar"></div>';
+ return '<div class="notice">Soal uraian akan diperiksa manual oleh admin/guru.</div>';
+}
+async function questionBankAdmin(editId){
+ if(!(await isAdmin()))return adminLogin();
+ var q=await db.collection('questionBank').get(),list=q.docs.map(function(d){return Object.assign({id:d.id},d.data());}),edit=editId?list.find(function(x){return x.id===editId;}):null;
+ var cards=list.sort(function(a,b){return String(a.subject||'').localeCompare(String(b.subject||''));}).map(function(x){
+  return '<article class="question-card"><div class="question-card-main">'+(x.imageUrl?'<img src="'+esc(x.imageUrl)+'" alt="">':'')+'<div><span class="eyebrow">'+esc(x.subject||'Tanpa Mapel')+' • '+esc(x.classLevel||'')+'</span><h3>'+esc(x.question||'Soal')+'</h3><p>'+esc(questionTypeLabel(x.type))+' • Bobot '+esc(x.points||1)+'</p></div></div><div class="question-card-actions"><button class="btn small outline qedit" data-id="'+esc(x.id)+'">Edit</button><button class="btn small red qdelete" data-id="'+esc(x.id)+'">Hapus</button></div></article>';
+ }).join('')||'<div class="empty">Bank soal masih kosong.</div>';
+ var body='<main class="wrap question-bank"><div class="page-title-row"><div><h1>Bank Soal</h1><p class="muted">Soal disimpan di Firestore. Gambar disimpan di Google Drive melalui Apps Script.</p></div><button class="btn outline" id="toggleMediaSettings">⚙ Media</button></div>'+
+ '<section id="mediaSettings" class="card media-settings hidden-panel"><div class="section-head"><div><h2>Pengaturan Media Soal</h2><p class="muted">Masukkan URL Web App Apps Script penyimpanan gambar.</p></div></div><div class="field"><label>Apps Script Web App URL</label><input id="questionMediaEndpoint" class="input" value="'+esc(getQuestionMediaEndpoint())+'" placeholder="https://script.google.com/macros/s/.../exec"></div><button class="btn green" id="saveMediaEndpoint">Simpan Pengaturan</button></section>'+
+ '<div class="question-layout"><section class="card question-editor"><div class="section-head"><div><h2>'+(edit?'Edit Soal':'Buat Soal')+'</h2><p class="muted">Buat soal langsung di PakKom Exambro.</p></div></div><input type="hidden" id="questionEditId" value="'+esc(edit?edit.id:'')+'"><div class="form-grid-3"><div class="field"><label>Mata Pelajaran</label><input id="qSubject" class="input" value="'+esc(edit?edit.subject:'')+'" placeholder="Matematika"></div><div class="field"><label>Kelas</label><input id="qClass" class="input" value="'+esc(edit?edit.classLevel:'')+'" placeholder="7"></div><div class="field"><label>Bobot</label><input id="qPoints" class="input" type="number" min="0.1" step="0.1" value="'+esc(edit?edit.points||1:1)+'"></div></div><div class="field"><label>Jenis Soal</label><select id="qType" class="input"><option value="multiple_choice">Pilihan Ganda</option><option value="true_false">Benar / Salah</option><option value="short_answer">Isian Singkat</option><option value="essay">Uraian</option></select></div><div class="field"><label>Pertanyaan</label><textarea id="qText" class="input question-text" placeholder="Tuliskan soal...">'+esc(edit?edit.question:'')+'</textarea></div>'+
+ '<div class="question-media-box"><div class="field"><label>Gambar Soal (opsional)</label><div class="media-actions"><input id="questionImageFile" class="input" type="file" accept="image/*"><button class="btn outline" id="uploadQuestionImageBtn">Upload ke Drive</button></div><div class="or-line">atau tempel URL gambar</div><input id="questionImageUrl" class="input" value="'+esc(edit?edit.imageUrl||'':'')+'" placeholder="https://..."></div><div id="questionImagePreview" class="question-image-preview">'+(edit&&edit.imageUrl?'<img src="'+esc(edit.imageUrl)+'" alt="Preview">':'')+'</div><div id="questionUploadMsg"></div></div>'+
+ '<div id="questionAnswerFields"></div><div class="form-grid-2"><div class="field"><label>Topik/Bab</label><input id="qTopic" class="input" value="'+esc(edit?edit.topic||'':'')+'" placeholder="Bilangan"></div><div class="field"><label>Tingkat Kesulitan</label><select id="qDifficulty" class="input"><option>Mudah</option><option>Sedang</option><option>Sulit</option></select></div></div><button class="btn green block" id="saveQuestionBtn">'+(edit?'Simpan Perubahan':'Simpan ke Bank Soal')+'</button></section>'+
+ '<section><div class="question-list-head"><div><h2>Daftar Soal</h2><p class="muted">'+list.length+' soal tersimpan</p></div></div><div class="question-list">'+cards+'</div></section></div></main>';
+ top('Bank Soal',body,admin,'Dashboard');
+ el('qType').value=edit?edit.type||'multiple_choice':'multiple_choice';el('qDifficulty').value=edit?edit.difficulty||'Sedang':'Sedang';
+ function renderFields(){el('questionAnswerFields').innerHTML=questionTypeFields(el('qType').value,edit&&el('questionEditId').value?edit:{});}
+ renderFields();el('qType').onchange=function(){edit=null;renderFields();};
+ el('questionImageUrl').oninput=previewQuestionImage;el('uploadQuestionImageBtn').onclick=uploadQuestionImage;
+ el('toggleMediaSettings').onclick=function(){el('mediaSettings').classList.toggle('hidden-panel');};el('saveMediaEndpoint').onclick=saveQuestionMediaEndpoint;
+ el('saveQuestionBtn').onclick=saveQuestion;
+ document.querySelectorAll('.qedit').forEach(function(b){b.onclick=function(){questionBankAdmin(b.dataset.id);};});
+ document.querySelectorAll('.qdelete').forEach(function(b){b.onclick=function(){deleteQuestion(b.dataset.id);};});
+}
+function questionTypeLabel(t){return {multiple_choice:'Pilihan Ganda',true_false:'Benar / Salah',short_answer:'Isian Singkat',essay:'Uraian'}[t]||t;}
+async function saveQuestion(){
+ var id=el('questionEditId').value,type=el('qType').value,text=el('qText').value.trim(),subject=el('qSubject').value.trim();
+ if(!text||!subject)return pakkomAlert('Mata pelajaran dan pertanyaan wajib diisi.');
+ var data={subject:subject,classLevel:el('qClass').value.trim(),points:Number(el('qPoints').value)||1,type:type,question:text,imageUrl:el('questionImageUrl').value.trim(),topic:el('qTopic').value.trim(),difficulty:el('qDifficulty').value,updatedAt:firebase.firestore.FieldValue.serverTimestamp()};
+ if(data.imageUrl&&!https(data.imageUrl))return pakkomAlert('URL gambar harus HTTPS.');
+ if(type==='multiple_choice'){data.options=[].slice.call(document.querySelectorAll('.q-option')).map(function(x){return x.value.trim();});var c=document.querySelector('input[name="correctOption"]:checked');if(data.options.some(function(x){return !x;})||!c)return pakkomAlert('Lengkapi semua pilihan dan pilih kunci jawaban.');data.correctIndex=Number(c.value);}
+ else if(type==='true_false')data.answer=el('qTrueFalse').value;
+ else if(type==='short_answer'){data.answer=el('qShortAnswer').value.trim();if(!data.answer)return pakkomAlert('Masukkan kunci jawaban singkat.');}
+ else data.manualGrading=true;
+ try{if(id)await db.collection('questionBank').doc(id).set(data,{merge:true});else{data.createdAt=firebase.firestore.FieldValue.serverTimestamp();await db.collection('questionBank').add(data);}questionBankAdmin();}catch(e){pakkomAlert('Soal gagal disimpan: '+(e.code||e.message));}
+}
+async function deleteQuestion(id){if(!confirm('Hapus soal ini dari Bank Soal?'))return;try{await db.collection('questionBank').doc(id).delete();questionBankAdmin();}catch(e){pakkomAlert('Soal gagal dihapus: '+(e.code||e.message));}}
 
 })();
 
