@@ -1,0 +1,911 @@
+(function(){
+'use strict';
+var app=document.getElementById('app'),boot=document.getElementById('boot');
+var db,auth;
+var SESSION_KEY='pakkom_v12_lite_student';
+var ACTIVE_EXAM_KEY='pakkom_v12_lite_active_exam';
+var EXAM_WARN_KEY='pakkom_v16_exam_warnings';
+var SERVER_OFFSET_MS=0,SERVER_TIME_SYNCED=false,monitorUnsubs=[];
+var INACTIVITY_LIMIT=12*60*60*1000, ACTIVITY_WRITE_GAP=15000,EXAM_SESSION_HEARTBEAT=60000,lastWrite=0,examSessionHeartbeatHandle=null;
+var state={classId:'',student:null,exams:[],currentExam:null};
+var classList=[],adminStudents=[],examTimerHandle=null,examGuardActive=false,lastExamViolationAt=0,networkWasOffline=false;
+var branding={appName:'PakKom Exambro',schoolName:'',logoDataUrl:''};
+
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function el(id){return document.getElementById(id);}
+function msg(id,text,type){var n=el(id);if(n)n.innerHTML='<div class="'+(type||'error')+'">'+esc(text)+'</div>';}
+function hideBoot(){if(boot)boot.classList.add('hide');}
+function fatal(s){if(window.PAKKOM_BOOT_ERROR)window.PAKKOM_BOOT_ERROR(s);}
+function https(u){return /^https:\/\//i.test(String(u||''));}
+function fmt(ts){try{var d=ts&&ts.toDate?ts.toDate():(ts instanceof Date?ts:null);return d?d.toLocaleString('id-ID'):'-';}catch(e){return '-';}}
+function toDate(ts){try{return ts&&ts.toDate?ts.toDate():(ts instanceof Date?ts:null);}catch(e){return null;}}
+function dateKey(ts){var d=toDate(ts);if(!d)return '9999-99-99';return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function dateInfo(ts){var d=toDate(ts);if(!d)return {key:'9999-99-99',day:'Tanpa jadwal',date:'-',month:'',full:'Jadwal belum ditentukan',short:'Tanpa jadwal'};return {key:dateKey(ts),day:d.toLocaleDateString('id-ID',{weekday:'long'}),date:String(d.getDate()),month:d.toLocaleDateString('id-ID',{month:'short'}),full:d.toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'}),short:d.toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})};}
+function timeOnly(ts){var d=toDate(ts);return d?d.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}).replace('.',':'):'--:--';}
+function nowMs(){return Date.now()+SERVER_OFFSET_MS;}
+function nowDate(){return new Date(nowMs());}
+async function syncServerClock(){try{if(!auth.currentUser)return;var ref=db.collection('timeSync').doc(auth.currentUser.uid);await ref.set({serverAt:firebase.firestore.FieldValue.serverTimestamp()});var d=await ref.get({source:'server'});var st=d.exists&&d.data().serverAt&&d.data().serverAt.toDate?d.data().serverAt.toDate():null;if(st){SERVER_OFFSET_MS=st.getTime()-Date.now();SERVER_TIME_SYNCED=true;}}catch(e){console.warn('server clock',e);} }
+function serverClockLabel(){return SERVER_TIME_SYNCED?'Waktu server':'Waktu perangkat';}
+function stopRealtimeMonitor(){monitorUnsubs.forEach(function(u){try{u();}catch(e){}});monitorUnsubs=[];}
+function formatClock(ts){var d=toDate(ts);return d?d.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',second:'2-digit'}).replace(/\./g,':'):'-';}
+function sortExamsBySchedule(list){return list.slice().sort(function(a,b){var ad=toDate(a.startAt),bd=toDate(b.startAt),av=ad?ad.getTime():8640000000000000,bv=bd?bd.getTime():8640000000000000;return av-bv||String(a.name||'').localeCompare(String(b.name||''));});}
+function groupByExamDate(list){var groups={},order=[];sortExamsBySchedule(list).forEach(function(x){var k=dateKey(x.startAt);if(!groups[k]){groups[k]=[];order.push(k);}groups[k].push(x);});return order.map(function(k){return {key:k,info:dateInfo(groups[k][0].startAt),items:groups[k]};});}
+function sameDay(a,b){return a&&b&&a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();}
+function formatDuration(ms){if(ms<=0)return '00:00:00';var total=Math.floor(ms/1000),h=Math.floor(total/3600),m=Math.floor((total%3600)/60),sec=total%60;return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');}
+function examDurationText(x){var st=toDate(x.startAt),en=toDate(x.endAt);if(!st||!en)return 'Durasi mengikuti penyelenggara';var mins=Math.max(0,Math.round((en-st)/60000));return mins+' menit';}
+function stopExamTimer(){if(examTimerHandle){clearInterval(examTimerHandle);examTimerHandle=null;}}
+function startExamTimer(x){stopExamTimer();var node=el('examCountdown');function tick(){if(!node)return stopExamTimer();var en=toDate(x.endAt);if(!en){node.textContent='Tanpa batas waktu';return;}var left=en.getTime()-nowMs();node.textContent=left>0?formatDuration(left):'00:00:00';node.classList.toggle('danger-time',left<=10*60*1000);if(left<=0)stopExamTimer();}tick();examTimerHandle=setInterval(tick,1000);}
+
+async function sha256(s){var data=new TextEncoder().encode(String(s));var h=await crypto.subtle.digest('SHA-256',data);return Array.from(new Uint8Array(h)).map(function(b){return b.toString(16).padStart(2,'0');}).join('');}
+function brandName(){return branding.appName||'PakKom Exambro';}
+function brandLogo(cls){var c=cls||'logo';return branding.logoDataUrl?'<span class="'+c+' brand-logo-img"><img src="'+esc(branding.logoDataUrl)+'" alt="Logo"></span>':'<span class="'+c+'">P</span>'; }
+async function loadBranding(){try{var d=await db.collection('settings').doc('branding').get();if(d.exists){var x=d.data()||{};branding={appName:String(x.appName||'PakKom Exambro').trim()||'PakKom Exambro',schoolName:String(x.schoolName||'').trim(),logoDataUrl:String(x.logoDataUrl||'')};}}catch(e){console.warn('branding',e);}return branding;}
+function examWarnMap(){try{return JSON.parse(localStorage.getItem(EXAM_WARN_KEY)||'{}')||{};}catch(e){return {};}}
+function getExamWarningCount(examId){var m=examWarnMap();return Number(m[attemptId(examId)]||0);}
+function setExamWarningCount(examId,n){var m=examWarnMap();m[attemptId(examId)]=Number(n)||0;localStorage.setItem(EXAM_WARN_KEY,JSON.stringify(m));}
+function clearExamWarningCount(examId){var m=examWarnMap();delete m[attemptId(examId)];localStorage.setItem(EXAM_WARN_KEY,JSON.stringify(m));}
+function beepWarning(){try{var C=window.AudioContext||window.webkitAudioContext;if(!C)return;var c=new C(),master=c.createGain();master.gain.setValueAtTime(.22,c.currentTime);master.connect(c.destination);[[0,1080],[.18,760],[.36,1080]].forEach(function(p){var o=c.createOscillator(),g=c.createGain(),t=c.currentTime+p[0];o.type='square';o.frequency.setValueAtTime(p[1],t);g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.55,t+.015);g.gain.exponentialRampToValueAtTime(.0001,t+.13);o.connect(g);g.connect(master);o.start(t);o.stop(t+.14);});setTimeout(function(){c.close().catch(function(){});},750);}catch(e){}}
+function enableExamGuard(){examGuardActive=true;lastExamViolationAt=0;}
+function disableExamGuard(){examGuardActive=false;}
+async function appendViolationLog(x,count,type){
+ try{
+  var ref=db.collection('examAttempts').doc(attemptId(x.id)),at=await getAttempt(x.id);if(!at||at.status!=='in_progress')return;
+  var item={type:type||'visibility_hidden',count:Number(count)||1,at:new Date(nowMs()).toISOString(),label:'Keluar/pindah tab'};
+  await ref.set({violationCount:Number(count)||1,violationLog:firebase.firestore.FieldValue.arrayUnion(item),updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+ }catch(e){console.warn('violation log',e);}
+}
+async function registerExamViolation(){
+ if(!examGuardActive||!state.currentExam||!state.student)return;
+ if(!navigator.onLine){networkWasOffline=true;return;}
+ var now=nowMs();if(now-lastExamViolationAt<1400)return;lastExamViolationAt=now;
+ var x=state.currentExam,count=getExamWarningCount(x.id)+1;setExamWarningCount(x.id,count);beepWarning();
+ await appendViolationLog(x,count,'visibility_hidden');
+ if(count>=2){disableExamGuard();await forceCompleteForViolation(x);return;}
+ await pakkomAlert('Peringatan 1 dari 2. Anda terdeteksi keluar dari halaman ujian atau membuka tab/aplikasi lain. Jika terjadi sekali lagi, ujian otomatis dianggap selesai dan dikunci.','Peringatan Ujian');
+}
+async function forceCompleteForViolation(x){
+ try{
+  var ref=db.collection('examAttempts').doc(attemptId(x.id)),at=await getAttempt(x.id);
+  await ref.set({examId:x.id,studentId:state.student.id,nis:state.student.nis,classId:state.classId,status:'completed',createdByAuthUid:(at&&at.createdByAuthUid)||auth.currentUser.uid,completedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),autoCompleted:true,completionReason:'left_exam_twice',violationCount:Math.max(2,Number(at&&at.violationCount||2))},{merge:true});
+  stopExamTimer();stopExamSessionHeartbeat();saveActiveExam('');clearExamWarningCount(x.id);state.currentExam=null;
+  await pakkomAlert('Anda terdeteksi keluar dari halaman ujian sebanyak 2 kali. Ujian otomatis dianggap selesai dan telah dikunci.','Ujian Dikunci');studentDashboard();
+ }catch(e){examGuardActive=true;pakkomAlert('Pelanggaran terdeteksi, tetapi status ujian gagal dikunci: '+(e.code||e.message));}
+}
+
+function uiIcon(name){
+ var p={
+  classes:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  students:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  exam:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+  monitor:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18M7 16l4-5 4 3 5-8"/></svg>',
+  result:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/></svg>',
+  settings:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.12.36.33.7.6 1 .3.27.68.4 1.1.4h.1v4h-.1c-.42 0-.8.13-1.1.4-.27.3-.48.64-.6 1z"/></svg>',
+  calendar:'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></svg>',
+  clock:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  people:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8"/></svg>'
+ };
+ return '<span class="ui-icon">'+(p[name]||p.settings)+'</span>';
+}
+
+function top(title,body,backFn,backText){var view=String(title||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');document.body.dataset.view=view;app.innerHTML='<div class="top"><div class="brand">'+brandLogo('logo')+'<div class="top-brand-copy"><b>'+esc(title)+'</b>'+(branding.schoolName?'<span>'+esc(branding.schoolName)+'</span>':'')+'</div></div><button class="btn gray small" id="topBack">'+esc(backText||'Kembali')+'</button></div>'+body;el('topBack').onclick=backFn||home;}
+
+function pakkomAlert(message,title){
+ return new Promise(function(resolve){
+  var old=document.getElementById('pakkomModal');if(old)old.remove();
+  var wrap=document.createElement('div');wrap.id='pakkomModal';wrap.className='modal-backdrop';
+  wrap.innerHTML='<div class="modal-card"><div class="modal-title">'+esc(title||'PakKom Exambro')+'</div><div class="modal-message">'+esc(message)+'</div><div class="modal-actions"><button class="btn" id="pakkomModalOk">Oke</button></div></div>';
+  document.body.appendChild(wrap);
+  document.getElementById('pakkomModalOk').onclick=function(){wrap.remove();resolve(true);};
+ });
+}
+function pakkomConfirm(message,title){
+ return new Promise(function(resolve){
+  var old=document.getElementById('pakkomModal');if(old)old.remove();
+  var wrap=document.createElement('div');wrap.id='pakkomModal';wrap.className='modal-backdrop';
+  wrap.innerHTML='<div class="modal-card"><div class="modal-title">'+esc(title||'PakKom Exambro')+'</div><div class="modal-message">'+esc(message)+'</div><div class="modal-actions"><button class="btn gray" id="pakkomModalCancel">Batal</button><button class="btn" id="pakkomModalOk">Ya, Lanjutkan</button></div></div>';
+  document.body.appendChild(wrap);
+  document.getElementById('pakkomModalCancel').onclick=function(){wrap.remove();resolve(false);};
+  document.getElementById('pakkomModalOk').onclick=function(){wrap.remove();resolve(true);};
+ });
+}
+
+if(typeof firebase==='undefined'){fatal('Firebase tidak berhasil dimuat.');return;}
+if(!window.FIREBASE_CONFIG){fatal('FIREBASE_CONFIG tidak ditemukan.');return;}
+try{
+ if(!firebase.apps.length)firebase.initializeApp(window.FIREBASE_CONFIG);
+ auth=firebase.auth();db=firebase.firestore();
+ auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
+}catch(e){fatal('Firebase gagal: '+e.message);return;}
+hideBoot();
+
+async function ensureAnon(){
+ var u=auth.currentUser;
+ if(u)return u;
+ var c=await auth.signInAnonymously();return c.user;
+}
+async function isAdmin(){
+ var u=auth.currentUser;if(!u||u.isAnonymous)return false;
+ try{var d=await db.collection('admins').doc(u.uid).get();return d.exists&&d.data().role==='admin'&&d.data().active===true;}catch(e){return false;}
+}
+function readSession(){try{return JSON.parse(localStorage.getItem(SESSION_KEY)||'null');}catch(e){return null;}}
+function saveSession(){if(!state.student)return;var now=Date.now();localStorage.setItem(SESSION_KEY,JSON.stringify({id:state.student.id,classId:state.classId,lastActivity:now}));lastWrite=now;}
+function stopExamSessionHeartbeat(){if(examSessionHeartbeatHandle){clearInterval(examSessionHeartbeatHandle);examSessionHeartbeatHandle=null;}}
+function startExamSessionHeartbeat(){
+ stopExamSessionHeartbeat();
+ markActivity();
+ examSessionHeartbeatHandle=setInterval(function(){
+  if(!state.student||!state.currentExam){stopExamSessionHeartbeat();return;}
+  var s=readSession();
+  if(!s||s.id!==state.student.id)return;
+  s.lastActivity=Date.now();
+  localStorage.setItem(SESSION_KEY,JSON.stringify(s));
+  lastWrite=Date.now();
+ },EXAM_SESSION_HEARTBEAT);
+}
+function clearSession(){stopExamSessionHeartbeat();localStorage.removeItem(SESSION_KEY);localStorage.removeItem(ACTIVE_EXAM_KEY);state={classId:'',student:null,exams:[],currentExam:null};lastWrite=0;}
+function saveActiveExam(examId){if(examId)localStorage.setItem(ACTIVE_EXAM_KEY,String(examId));else localStorage.removeItem(ACTIVE_EXAM_KEY);}
+function readActiveExam(){return localStorage.getItem(ACTIVE_EXAM_KEY)||'';}
+function attemptId(examId){return String(state.student.id)+'__'+String(examId);}
+async function getAttempt(examId){try{var d=await db.collection('examAttempts').doc(attemptId(examId)).get();return d.exists?Object.assign({id:d.id},d.data()):null;}catch(e){console.warn('getAttempt',e);return null;}}
+async function getAttemptsForStudent(){try{var q=await db.collection('examAttempts').where('studentId','==',state.student.id).get(),m={};q.docs.forEach(function(d){var x=d.data();m[String(x.examId)]=Object.assign({id:d.id},x);});return m;}catch(e){console.warn('getAttemptsForStudent',e);return {};}}
+function expired(s){return !s||!s.lastActivity||Date.now()-Number(s.lastActivity)>=INACTIVITY_LIMIT;}
+function markActivity(){if(!state.student)return;var now=Date.now();if(now-lastWrite<ACTIVITY_WRITE_GAP)return;var s=readSession();if(!s||s.id!==state.student.id)return;s.lastActivity=now;localStorage.setItem(SESSION_KEY,JSON.stringify(s));lastWrite=now;}
+function checkIdle(){
+ if(!state.student)return;
+ // Jangan pernah mengeluarkan siswa hanya karena aktivitas di iframe
+ // tidak terdeteksi selama ujian masih berlangsung.
+ if(state.currentExam||readActiveExam()){
+  markActivity();
+  return;
+ }
+ var s=readSession();
+ if(expired(s)){
+  clearSession();
+  renderHome('Sesi siswa telah berakhir. Silakan masuk kembali.');
+ }
+}
+async function restoreStudent(){
+ var s=readSession();if(!s||expired(s)){clearSession();return false;}
+ try{await ensureAnon();var d=await db.collection('students').doc(s.id).get();if(!d.exists){clearSession();return false;}var x=d.data();if(x.approved!==true||x.active!==true||String(x.classId)!==String(s.classId)){clearSession();return false;}state.classId=s.classId;state.student=Object.assign({id:d.id},x);lastWrite=Number(s.lastActivity)||Date.now();return true;}catch(e){clearSession();return false;}
+}
+
+async function home(){
+ disableExamGuard();
+ if(await restoreStudent()){studentDashboard();return;}
+ var u=auth.currentUser;if(u&&!u.isAnonymous&&await isAdmin()){await loadBranding();await syncServerClock();admin();return;}
+ try{if(u&&!u.isAnonymous){await auth.signOut();}await ensureAnon();}catch(e){}
+ await loadBranding();await syncServerClock();renderHome('');
+}
+function renderHome(note){
+ var logo=branding.logoDataUrl?'<div class="home-brand-logo uploaded"><img src="'+esc(branding.logoDataUrl)+'" alt="Logo"></div>':'<div class="home-brand-logo">P</div>';
+ app.innerHTML='<main class="home-page simple-home"><section class="simple-login-shell"><div class="simple-brand">'+logo+'<div><h1>'+esc(brandName())+'</h1>'+(branding.schoolName?'<p>'+esc(branding.schoolName)+'</p>':'')+'</div></div><div class="card simple-login-card"><h2>Masuk</h2><p class="muted">Gunakan NIS siswa atau email admin.</p>'+(note?'<div class="notice">'+esc(note)+'</div>':'')+'<label>NIS / Email Admin</label><input id="unifiedAccount" class="input" autocomplete="username" placeholder="NIS atau email"><label>Password</label><input id="unifiedPass" class="input" type="password" autocomplete="current-password" placeholder="Password"><button class="btn block" id="unifiedLogin">Masuk</button><button class="btn gray block" id="newStudent" style="margin-top:8px">Daftar Siswa Baru</button><div id="unifiedMsg"></div></div><div class="home-version">PakKom Exambro V18.0.1</div></section></main>';
+ el('unifiedLogin').onclick=doUnifiedLogin;el('newStudent').onclick=classGate;el('unifiedPass').onkeydown=function(e){if(e.key==='Enter')doUnifiedLogin();};
+}
+async function doUnifiedLogin(){
+ var account=el('unifiedAccount').value.trim(),p=el('unifiedPass').value;if(!account||!p){msg('unifiedMsg','Akun dan password wajib diisi.');return;}msg('unifiedMsg','Memeriksa akun…','info');
+ if(account.indexOf('@')>=0){try{if(auth.currentUser)await auth.signOut();await auth.signInWithEmailAndPassword(account,p);if(!(await isAdmin())){await auth.signOut();await ensureAnon();msg('unifiedMsg','Akun admin tidak aktif atau tidak memiliki akses.');return;}await loadBranding();admin();}catch(e){try{await ensureAnon();}catch(_){}msg('unifiedMsg','Login admin gagal. Periksa email dan password.');}return;}
+ try{await ensureAnon();var q=await db.collection('students').where('nis','==',account).limit(2).get();if(q.empty){msg('unifiedMsg','NIS tidak ditemukan.');return;}var d=q.docs[0],x=d.data();if(x.approved!==true){msg('unifiedMsg','Pendaftaran masih menunggu persetujuan admin.','info');return;}if(x.active!==true){msg('unifiedMsg','Akun siswa sedang tidak aktif.');return;}var ok=x.passwordHash?(await sha256(p))===String(x.passwordHash):String(x.password||'')===String(p);if(!ok){msg('unifiedMsg','Password siswa salah.');return;}state.classId=String(x.classId||'');state.student=Object.assign({id:d.id},x);studentClassAccessGate();}catch(e){msg('unifiedMsg','Login siswa gagal: '+(e.code||e.message));}
+}
+
+async function studentClassAccessGate(){
+ if(!state.student||!state.classId)return home();
+ app.innerHTML='<div class="login card"><h1>Masuk Kelas</h1><p class="muted">Akun siswa berhasil diverifikasi. Masukkan password kelas untuk membuka halaman siswa.</p><div class="notice"><b>'+esc(state.student.name)+'</b><br>Kelas '+esc(state.classId)+'</div><label>Password Kelas</label><input id="studentClassPass" class="input" type="password" autocomplete="current-password" placeholder="Password kelas"><button class="btn block" id="verifyStudentClass">Lanjut ke Halaman Siswa</button><button class="btn gray block" id="cancelStudentClass" style="margin-top:8px">Keluar</button><div id="studentClassMsg"></div></div>';
+ el('verifyStudentClass').onclick=verifyStudentClassAccess;el('cancelStudentClass').onclick=studentLogout;el('studentClassPass').onkeydown=function(e){if(e.key==='Enter')verifyStudentClassAccess();};
+}
+async function verifyStudentClassAccess(){
+ var p=el('studentClassPass').value;if(!p)return msg('studentClassMsg','Password kelas wajib diisi.');
+ msg('studentClassMsg','Memeriksa password kelas…','info');
+ try{
+  var d=await db.collection('classes').doc(state.classId).get();
+  if(!d.exists)return msg('studentClassMsg','Kelas belum terdaftar. Hubungi admin.');
+  var x=d.data()||{};if(x.active===false)return msg('studentClassMsg','Kelas sedang dinonaktifkan oleh admin.');
+  var ok=x.passwordHash?(await sha256(p))===String(x.passwordHash):String(x.password||x.demoPassword||'')===String(p);
+  if(!ok)return msg('studentClassMsg','Password kelas salah.');
+  saveSession();studentDashboard();
+ }catch(e){msg('studentClassMsg','Kelas tidak dapat diverifikasi: '+(e.code||e.message));}
+}
+
+async function loadClasses(){
+ await ensureAnon();
+ try{var s=await db.collection('classes').where('active','==',true).get();classList=s.docs.map(function(d){return Object.assign({id:d.id},d.data());}).sort(function(a,b){return String(a.id).localeCompare(String(b.id),undefined,{numeric:true});});return true;}catch(e){console.error(e);classList=[];return false;}
+}
+async function classGate(){
+ app.innerHTML='<div class="login card"><h1>Masuk Kelas</h1><label>Kelas</label><select id="kelas"><option>Memuat…</option></select><label>Password Kelas</label><input id="kpw" class="input" type="password"><button class="btn block" id="goClass">Lanjut</button><button class="btn gray block" id="backHome" style="margin-top:8px">Kembali</button><div id="classMsg"></div></div>';
+ el('backHome').onclick=home;el('goClass').onclick=verifyClass;
+ var ok=await loadClasses();var s=el('kelas');if(ok&&classList.length)s.innerHTML='<option value="">-- Pilih kelas --</option>'+classList.map(function(x){return '<option value="'+esc(x.id)+'">'+esc(x.name||x.id)+'</option>';}).join('');else{s.innerHTML='<option value="">-- Kelas belum tersedia --</option>';msg('classMsg','Kelas gagal dimuat. Pastikan Anonymous Authentication aktif dan Firestore Rules V18.0 sudah dipublish.');}
+}
+async function verifyClass(){
+ var id=el('kelas').value,p=el('kpw').value;if(!id||!p){msg('classMsg','Pilih kelas dan masukkan password.');return;}
+ msg('classMsg','Memeriksa kelas…','info');
+ try{var d=await db.collection('classes').doc(id).get();if(!d.exists){msg('classMsg','Kelas tidak ditemukan.');return;}var x=d.data();if(x.active===false){msg('classMsg','Kelas sedang dinonaktifkan.');return;}var ok=false;if(x.passwordHash)ok=(await sha256(p))===String(x.passwordHash);else ok=String(x.password||x.demoPassword||'')===String(p);if(!ok){msg('classMsg','Password kelas salah.');return;}state.classId=id;registerStudent();}catch(e){msg('classMsg','Kelas tidak dapat diperiksa: '+(e.code||e.message));}
+}
+function studentChoice(){registerStudent();}
+function loginStudent(){app.innerHTML='<div class="login card"><h1>Login Siswa</h1><span class="pill">Kelas '+esc(state.classId)+'</span><label>NIS</label><input id="lnis" class="input" inputmode="numeric"><label>Password</label><input id="lpw" class="input" type="password"><button class="btn block" id="doSL">Masuk</button><button class="btn gray block" id="bkSL" style="margin-top:8px">Kembali</button><div id="loginMsg"></div></div>';el('doSL').onclick=doStudentLogin;el('bkSL').onclick=studentChoice;}
+async function doStudentLogin(){
+ var nis=el('lnis').value.trim(),p=el('lpw').value;if(!nis||!p){msg('loginMsg','NIS dan password wajib.');return;}msg('loginMsg','Memeriksa akun…','info');
+ try{await ensureAnon();var q=await db.collection('students').where('nis','==',nis).where('classId','==',state.classId).limit(1).get();if(q.empty){msg('loginMsg','NIS tidak ditemukan di kelas ini.');return;}var d=q.docs[0],x=d.data();if(x.approved!==true){msg('loginMsg','Pendaftaran masih menunggu persetujuan admin.','info');return;}if(x.active!==true){msg('loginMsg','Akun siswa belum aktif atau dinonaktifkan.');return;}var ok=x.passwordHash?(await sha256(p))===String(x.passwordHash):String(x.password||'')===String(p);if(!ok){msg('loginMsg','Password siswa salah.');return;}state.student=Object.assign({id:d.id},x);saveSession();studentDashboard();}catch(e){msg('loginMsg','Login gagal: '+(e.code||e.message));}
+}
+function registerStudent(){app.innerHTML='<div class="login card"><h1>Daftar Mandiri</h1><span class="pill">Kelas '+esc(state.classId)+'</span><label>NIS</label><input id="rnis" class="input" inputmode="numeric"><label>Nama Lengkap</label><input id="rname" class="input"><label>Password</label><input id="rpw" class="input" type="password"><label>Konfirmasi Password</label><input id="rcpw" class="input" type="password"><button class="btn green block" id="doReg">Daftar</button><button class="btn gray block" id="bkReg" style="margin-top:8px">Kembali</button><div id="regMsg"></div></div>';el('doReg').onclick=doRegister;el('bkReg').onclick=home;}
+async function doRegister(){
+ var nis=el('rnis').value.trim(),name=el('rname').value.trim(),p=el('rpw').value,cp=el('rcpw').value;if(!nis||!name||!p){msg('regMsg','Semua data wajib diisi.');return;}if(p.length<6){msg('regMsg','Password minimal 6 karakter.');return;}if(p!==cp){msg('regMsg','Konfirmasi password tidak sama.');return;}msg('regMsg','Mendaftarkan…','info');
+ try{await ensureAnon();var q=await db.collection('students').where('nis','==',nis).limit(1).get();if(!q.empty){msg('regMsg','NIS sudah terdaftar.');return;}var h=await sha256(p);await db.collection('students').add({nis:nis,name:name,classId:state.classId,passwordHash:h,active:false,approved:false,registrationSource:'self',createdByAuthUid:auth.currentUser.uid,createdAt:firebase.firestore.FieldValue.serverTimestamp()});app.innerHTML='<div class="login card"><h1>Pendaftaran Berhasil</h1><div class="notice"><b>'+esc(name)+'</b>, akun Anda sudah dikirim dan <b>menunggu persetujuan admin/guru</b>.</div><p class="muted">Setelah disetujui, kembali ke halaman masuk menggunakan NIS dan password yang dibuat.</p><button class="btn block" id="toLogin">Ke Halaman Masuk</button></div>';el('toLogin').onclick=home;}catch(e){msg('regMsg','Pendaftaran gagal: '+(e.code||e.message));}
+}
+
+async function studentDashboard(){
+ stopExamTimer();checkIdle();if(!state.student)return;
+ var activeId=readActiveExam();
+ if(activeId){
+  try{
+   var pair=await Promise.all([db.collection('examAttempts').doc(attemptId(activeId)).get(),db.collection('examPublic').doc(activeId).get()]);
+   if(pair[0].exists&&pair[0].data().status==='in_progress'&&pair[1].exists){var ax=Object.assign({id:pair[1].id},pair[1].data());var allowed=!Array.isArray(ax.allowedClasses)||!ax.allowedClasses.length||ax.allowedClasses.indexOf(state.classId)>=0;if(allowed){state.currentExam=ax;resumeExam(ax);return;}}
+   if(pair[0].exists&&pair[0].data().status==='completed')saveActiveExam('');
+  }catch(e){console.warn('restore active exam',e);}
+ }
+ try{var s=await db.collection('examPublic').where('active','==',true).get();state.exams=sortExamsBySchedule(s.docs.map(function(d){return Object.assign({id:d.id},d.data());}).filter(function(x){return !Array.isArray(x.allowedClasses)||!x.allowedClasses.length||x.allowedClasses.indexOf(state.classId)>=0;}));}catch(e){state.exams=[];}
+ var attempts={};
+ try{var attemptDocs=await Promise.all(state.exams.map(function(x){return db.collection('examAttempts').doc(attemptId(x.id)).get();}));attemptDocs.forEach(function(d,i){if(d.exists)attempts[String(state.exams[i].id)]=Object.assign({id:d.id},d.data());});}catch(e){console.warn('load direct attempts',e);}
+ await syncServerClock();var now=nowDate(),todayCount=0,completedCount=0,pendingToday=0;
+ state.exams.forEach(function(x){var at=attempts[x.id],sd=toDate(x.startAt);if(at&&at.status==='completed')completedCount++;if(sd&&sameDay(sd,now)){todayCount++;if(!at||at.status!=='completed')pendingToday++;}});
+ var groups=groupByExamDate(state.exams),cards='';
+ groups.forEach(function(g){cards+='<section class="student-exam-day"><div class="student-exam-day-title"><div class="exam-date-badge"><strong>'+esc(g.info.date)+'</strong><span>'+esc(g.info.month||'Jadwal')+'</span></div><div><b>'+esc(g.info.day)+'</b><span>'+esc(g.info.full)+'</span></div></div><div class="exam-grid">'+g.items.map(function(x){return examCard(x,attempts[x.id]);}).join('')+'</div></section>';});
+ if(!cards)cards='<div class="empty">Belum ada ujian aktif untuk kelas ini.</div>';
+ var hero='<section class="student-hero"><div><span class="eyebrow">PORTAL SISWA</span><h1>Halo, '+esc(state.student.name)+'</h1><p>Kelas '+esc(state.classId)+' • NIS '+esc(state.student.nis)+'</p></div><div class="student-hero-actions"><div class="student-session"><span class="session-dot"></span>Sesi aktif</div><button class="btn outline small" id="studentScoresBtn">Nilai Saya</button><button class="btn gray small" id="changeStudentPassword">Ganti Sandi</button></div></section>';
+ var stats='<section class="student-stats"><div class="student-stat"><span>Ujian Hari Ini</span><b>'+todayCount+'</b></div><div class="student-stat"><span>Belum Selesai Hari Ini</span><b>'+pendingToday+'</b></div><div class="student-stat"><span>Total Sudah Ujian</span><b>'+completedCount+'</b></div></section>';
+ top('PakKom Exambro','<div class="wrap student-dashboard">'+hero+stats+'<div class="card schedule-card"><div class="section-head"><div><h2>Jadwal Ujian</h2><p class="muted">Pilih ujian sesuai jadwal. Status pengerjaan akan tetap tersimpan meskipun halaman direfresh.</p></div><span class="pill gray">'+state.exams.length+' ujian • '+serverClockLabel()+'</span></div>'+cards+'</div></div>',studentLogout,'Keluar');
+ Array.prototype.forEach.call(document.querySelectorAll('.exam-start'),function(b){b.onclick=function(){examPin(b.dataset.id);};});
+ Array.prototype.forEach.call(document.querySelectorAll('.exam-resume'),function(b){b.onclick=function(){var x=state.exams.find(function(a){return a.id===b.dataset.id;});if(x){state.currentExam=x;saveActiveExam(x.id);resumeExam(x);}};});
+ if(el('studentScoresBtn'))el('studentScoresBtn').onclick=studentScores;if(el('changeStudentPassword'))el('changeStudentPassword').onclick=studentChangePassword;
+}
+function examCard(x,attempt){
+ var n=nowMs(),sd=toDate(x.startAt),ed=toDate(x.endAt),st=sd?sd.getTime():0,en=ed?ed.getTime():0,future=st&&n<st,past=en&&n>en;
+ var meta='<div class="exam-meta">'+(sd?'<span class="time-chip">Mulai '+esc(timeOnly(x.startAt))+'</span>':'')+(ed?'<span class="time-chip">Selesai '+esc(timeOnly(x.endAt))+'</span>':'')+'</div>';
+ if(attempt&&attempt.status==='completed'){
+  var violation=attempt.completionReason==='left_exam_twice'||attempt.autoCompleted===true;
+  return '<div class="exam-card-modern"><div class="row"><div><h3>'+esc(x.name)+'</h3><div class="muted">'+esc(x.subject||'Ujian online')+'</div></div><span class="pill '+(violation?'red':'orange')+'">Sudah Ujian</span></div>'+meta+'<div class="notice '+(violation?'violation-note':'')+'">'+(violation?'<b>Diakhiri otomatis karena pelanggaran.</b><br>Sistem mencatat siswa keluar/pindah tab sebanyak 2 kali.':'Ujian sudah selesai dan terkunci.')+'</div><button class="btn '+(violation?'red':'orange')+' block" disabled>Sudah Ujian</button></div>';
+ }
+ if(attempt&&attempt.status==='in_progress')return '<div class="exam-card-modern"><div class="row"><div><h3>'+esc(x.name)+'</h3><div class="muted">'+esc(x.subject||'Ujian online')+'</div></div><span class="pill orange">Sedang dikerjakan</span></div>'+meta+'<button class="btn block exam-resume" data-id="'+esc(x.id)+'">Lanjutkan Ujian</button></div>';
+ if(past)return '<div class="exam-card-modern missed-exam"><div class="row"><div><h3>'+esc(x.name)+'</h3><div class="muted">'+esc(x.subject||'Ujian online')+'</div></div><span class="pill gray">Tidak Ujian</span></div>'+meta+'<div class="notice">Jadwal ujian telah berakhir dan tidak ada aktivitas pengerjaan.</div><button class="btn gray block" disabled>Tidak Ujian</button></div>';
+ var disabled=future;
+ return '<div class="exam-card-modern"><div class="row"><div><h3>'+esc(x.name)+'</h3><div class="muted">'+esc(x.subject||'Ujian online')+'</div></div><span class="pill '+(disabled?'orange':'green')+'">'+(future?'Belum mulai':'Aktif')+'</span></div>'+meta+'<button class="btn block '+(disabled?'gray':'')+' exam-start" data-id="'+esc(x.id)+'" '+(disabled?'disabled':'')+'>'+(disabled?'Belum tersedia':'Mulai Ujian')+'</button></div>';
+}
+
+async function studentChangePassword(){
+ if(!state.student)return studentDashboard();
+ top('Ganti Sandi','<div class="wrap"><div class="card password-card"><h2>Ganti Sandi Siswa</h2><p class="muted">Masukkan sandi saat ini, lalu buat sandi baru minimal 6 karakter.</p><label>Sandi Saat Ini</label><input id="oldStudentPass" class="input" type="password" autocomplete="current-password"><label>Sandi Baru</label><input id="newStudentPass" class="input" type="password" autocomplete="new-password"><label>Ulangi Sandi Baru</label><input id="confirmStudentPass" class="input" type="password" autocomplete="new-password"><button class="btn green block" id="saveStudentPass">Simpan Sandi Baru</button><div id="studentPassMsg"></div></div></div>',studentDashboard,'Kembali');
+ el('saveStudentPass').onclick=saveStudentPassword;
+}
+async function saveStudentPassword(){
+ var oldp=el('oldStudentPass').value,newp=el('newStudentPass').value,confirm=el('confirmStudentPass').value;
+ if(!oldp||!newp||!confirm)return msg('studentPassMsg','Semua kolom sandi wajib diisi.');
+ if(newp.length<6)return msg('studentPassMsg','Sandi baru minimal 6 karakter.');
+ if(newp!==confirm)return msg('studentPassMsg','Pengulangan sandi baru tidak sama.');
+ var currentHash=state.student.passwordHash?String(state.student.passwordHash):'',oldOk=currentHash?(await sha256(oldp))===currentHash:String(state.student.password||'')===String(oldp);
+ if(!oldOk)return msg('studentPassMsg','Sandi saat ini salah.');
+ if(oldp===newp)return msg('studentPassMsg','Sandi baru harus berbeda dari sandi saat ini.');
+ try{var h=await sha256(newp);await db.collection('students').doc(state.student.id).update({passwordHash:h,password:firebase.firestore.FieldValue.delete(),passwordUpdatedAt:firebase.firestore.FieldValue.serverTimestamp(),passwordAdminVisible:false});state.student.passwordHash=h;state.student.passwordAdminVisible=false;delete state.student.password;saveSession();await pakkomAlert('Sandi berhasil diganti. Gunakan sandi baru saat login berikutnya.');studentDashboard();}catch(e){msg('studentPassMsg','Sandi gagal diganti: '+(e.code||e.message));}
+}
+
+async function examPin(id){
+ var x=state.exams.find(function(a){return a.id===id;});if(!x)return;var at=await getAttempt(id);
+ if(at&&at.status==='completed'){await pakkomAlert('Ujian ini sudah selesai dikerjakan dan tidak dapat dibuka kembali.');studentDashboard();return;}
+ if(at&&at.status==='in_progress'){state.currentExam=x;saveActiveExam(x.id);resumeExam(x);return;}
+ state.currentExam=x;
+ var inf=dateInfo(x.startAt);
+ app.innerHTML='<main class="auth-page"><section class="auth-shell"><div class="auth-brand"><span class="logo large">P</span><div><b>PakKom Exambro</b><span>Verifikasi Ujian</span></div></div><div class="card auth-card"><span class="eyebrow">PIN UJIAN</span><h1>'+esc(x.name)+'</h1><p class="muted">'+esc(x.subject||'Ujian online')+' • '+esc(inf.full)+'</p><label>Masukkan PIN ujian</label><input id="pin" class="input pin-input" inputmode="numeric" type="password" placeholder="••••••"><button class="btn block" id="checkPin">Verifikasi PIN</button><button class="btn gray block" id="bkDash" style="margin-top:8px">Kembali ke Jadwal</button><div id="pinMsg"></div></div></section></main>';
+ el('checkPin').onclick=verifyPin;el('bkDash').onclick=studentDashboard;
+}
+async function verifyPin(){
+ var p=el('pin').value.trim();if(!p){msg('pinMsg','PIN wajib diisi.');return;}
+ try{var at=await getAttempt(state.currentExam.id);if(at&&at.status==='completed'){msg('pinMsg','Ujian ini sudah selesai dikerjakan dan tidak dapat dibuka kembali.');return;}var d=await db.collection('examSecrets').doc(state.currentExam.id).get();if(!d.exists){msg('pinMsg','PIN ujian belum disetel.');return;}var x=d.data(),ok=x.pinHash?(await sha256(p))===String(x.pinHash):String(x.pin||'')===String(p);if(!ok){msg('pinMsg','PIN salah.');return;}showExamPreparation(state.currentExam);}catch(e){msg('pinMsg','PIN tidak dapat diperiksa: '+(e.code||e.message));}
+}
+function showExamPreparation(x){
+ var info=dateInfo(x.startAt),classes=(x.allowedClasses||[]).join(', ')||'Semua kelas';
+ app.innerHTML='<main class="prep-page"><section class="prep-shell"><div class="prep-heading"><span class="eyebrow">PERSIAPAN UJIAN</span><h1>'+esc(x.name)+'</h1><p>'+esc(x.subject||'Ujian online')+'</p></div><div class="prep-grid"><div class="card prep-main"><div class="prep-student"><div class="avatar">'+esc((state.student.name||'S').charAt(0).toUpperCase())+'</div><div><b>'+esc(state.student.name)+'</b><span>NIS '+esc(state.student.nis)+' • Kelas '+esc(state.classId)+'</span></div></div><div class="prep-details"><div><span>Hari & Tanggal</span><b>'+esc(info.full)+'</b></div><div><span>Waktu</span><b>'+esc(timeOnly(x.startAt))+' – '+esc(timeOnly(x.endAt))+'</b></div><div><span>Durasi Jadwal</span><b>'+esc(examDurationText(x))+'</b></div><div><span>Peserta</span><b>'+esc(classes)+'</b></div></div></div><div class="card prep-rules"><h3>Sebelum memulai</h3><ol><li>Pastikan koneksi internet stabil dan perangkat memiliki daya yang cukup.</li><li>Jangan menekan tombol selesai sebelum jawaban pada soal benar-benar sudah dikirim.</li><li>Jika halaman direfresh saat mengerjakan, PakKom Exambro akan mengembalikan Anda ke soal.</li><li>Jangan berpindah tab, membuka aplikasi lain, atau meninggalkan halaman ujian. Pelanggaran pertama mendapat peringatan; pelanggaran kedua membuat ujian otomatis selesai dan terkunci.</li><li>Ujian yang sudah ditandai selesai akan terkunci dan hanya admin yang dapat mengaktifkannya kembali.</li></ol><button class="btn green block big" id="beginExam">Mulai Ujian Sekarang</button><button class="btn gray block" id="cancelPrep" style="margin-top:8px">Kembali</button><div id="prepMsg"></div></div></div></section></main>';
+ el('beginExam').onclick=function(){launchExam(x);};el('cancelPrep').onclick=studentDashboard;
+}
+function embedUrl(url){var u=String(url||'');if(/docs\.google\.com\/forms/i.test(u)){if(u.indexOf('embedded=true')<0)u+=(u.indexOf('?')>=0?'&':'?')+'embedded=true';}return u;}
+async function launchExam(x){
+ var ref=db.collection('examAttempts').doc(attemptId(x.id)),at=await getAttempt(x.id);if(at&&at.status==='completed'){await pakkomAlert('Ujian ini sudah selesai dikerjakan dan tidak dapat dibuka kembali.');return studentDashboard();}
+ var b=el('beginExam');if(b){b.disabled=true;b.textContent='Membuka ujian…';}
+ if(!at){try{await ref.set({examId:x.id,studentId:state.student.id,nis:state.student.nis,classId:state.classId,status:'in_progress',createdByAuthUid:auth.currentUser.uid,startedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});}catch(e){if(b){b.disabled=false;b.textContent='Mulai Ujian Sekarang';}msg('prepMsg','Ujian belum dapat dimulai: '+(e.code||e.message));return;}}
+ saveActiveExam(x.id);resumeExam(x);
+}
+function resumeExam(x){
+ syncServerClock();state.currentExam=x;saveActiveExam(x.id);var u=embedUrl(x.url),wc=getExamWarningCount(x.id);if(wc>=2){app.innerHTML='<div class="login card"><h2>Mengunci ujian…</h2><p class="muted">Batas pelanggaran perpindahan halaman telah tercapai.</p></div>';disableExamGuard();forceCompleteForViolation(x);return;}
+ app.innerHTML='<div class="exam-page"><div class="exam-topbar"><div class="exam-title">'+brandLogo('logo')+'<div><b>'+esc(x.name)+'</b><span>'+esc(x.subject||'Ujian online')+'</span></div></div><div class="exam-timer"><span>Sisa Waktu</span><b id="examCountdown">--:--:--</b></div><button class="btn finish-btn" id="finishExam">Sudah Selesai Mengerjakan</button></div><div class="exam-info-bar"><span><b>'+esc(state.student.name)+'</b> • Kelas '+esc(state.classId)+'</span><span>Jadwal '+esc(timeOnly(x.startAt))+' – '+esc(timeOnly(x.endAt))+'</span><button class="btn gray small" id="fullBtn">Fullscreen</button></div><div class="exam-warning"><b>Mode ujian aktif.</b> Jangan berpindah tab/aplikasi. Pelanggaran '+wc+'/2. Pelanggaran kedua akan otomatis mengakhiri ujian.</div><div class="exam-frame-wrap"><iframe class="exam-frame" src="'+esc(u)+'" allow="fullscreen" referrerpolicy="no-referrer-when-downgrade"></iframe></div></div>';
+ el('fullBtn').onclick=function(){var target=document.documentElement;if(target.requestFullscreen)target.requestFullscreen().catch(function(){});};el('finishExam').onclick=finishCurrentExam;startExamTimer(x);startExamSessionHeartbeat();enableExamGuard();
+}
+async function finishCurrentExam(){
+ var x=state.currentExam;if(!x)return;var confirmed=await pakkomConfirm('Pastikan jawaban sudah dikirim. Setelah ditandai selesai, ujian ini tidak dapat dikerjakan lagi. Lanjutkan?');if(!confirmed)return;disableExamGuard();
+ var b=el('finishExam');if(b){b.disabled=true;b.textContent='Menyimpan…';}
+ try{var ref=db.collection('examAttempts').doc(attemptId(x.id)),at=await getAttempt(x.id);if(at&&at.status==='completed'){stopExamTimer();stopExamSessionHeartbeat();saveActiveExam('');state.currentExam=null;return studentDashboard();}await ref.set({examId:x.id,studentId:state.student.id,nis:state.student.nis,classId:state.classId,status:'completed',createdByAuthUid:(at&&at.createdByAuthUid)||auth.currentUser.uid,completedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});stopExamTimer();stopExamSessionHeartbeat();saveActiveExam('');clearExamWarningCount(x.id);state.currentExam=null;await pakkomAlert('Ujian sudah selesai dan telah dikunci.');studentDashboard();}catch(e){enableExamGuard();if(b){b.disabled=false;b.textContent='Sudah Selesai Mengerjakan';}pakkomAlert('Status selesai gagal disimpan: '+(e.code||e.message));}
+}
+function studentLogout(){disableExamGuard();stopExamTimer();stopExamSessionHeartbeat();clearSession();home();}
+
+function adminLogin(){app.innerHTML='<div class="login card"><h1>Login Admin</h1><label>Email</label><input id="aemail" class="input" type="email"><label>Password</label><input id="apass" class="input" type="password"><button class="btn block" id="doAdmin">Masuk</button><button class="btn gray block" id="bkAdmin" style="margin-top:8px">Kembali</button><div id="adminMsg"></div></div>';el('doAdmin').onclick=doAdminLogin;el('bkAdmin').onclick=home;}
+async function doAdminLogin(){var email=el('aemail').value.trim(),p=el('apass').value;if(!email||!p){msg('adminMsg','Email dan password wajib.');return;}msg('adminMsg','Memeriksa admin…','info');try{if(auth.currentUser)await auth.signOut();await auth.signInWithEmailAndPassword(email,p);if(!(await isAdmin())){await auth.signOut();await ensureAnon();msg('adminMsg','Akun ini bukan admin aktif.');return;}admin();}catch(e){try{await ensureAnon();}catch(_){}msg('adminMsg','Login admin gagal: '+(e.code||e.message));}}
+async function admin(){
+ if(!(await isAdmin())){adminLogin();return;}
+ await loadBranding();
+ var counts={classes:0,students:0,exams:0},examList=[],attempts=[];
+ try{
+  var r=await Promise.all([
+   db.collection('classes').get(),
+   db.collection('students').get(),
+   db.collection('examPublic').get(),
+   db.collection('examAttempts').get()
+  ]);
+  counts={classes:r[0].size,students:r[1].size,exams:r[2].size};
+  examList=sortExamsBySchedule(r[2].docs.map(function(d){return Object.assign({id:d.id},d.data());}));
+  attempts=r[3].docs.map(function(d){return Object.assign({id:d.id},d.data());});
+ }catch(e){console.warn(e);}
+ var upcoming=examList.filter(function(x){
+   if(x.archived===true||x.active===false)return false;
+   var en=toDate(x.endAt);
+   return !en||en.getTime()>=nowMs();
+  }).slice(0,4);
+ var violations=attempts.filter(function(a){return a.completionReason==='left_exam_twice'||a.autoCompleted===true;}).length;
+ var upcomingHtml=upcoming.length?upcoming.map(function(x,i){
+   var dt=toDate(x.startAt),day=dt?String(dt.getDate()).padStart(2,'0'):'--',mon=dt?dt.toLocaleDateString('id-ID',{month:'short'}).replace('.','').toUpperCase():'';
+   var cls=['blue','green','purple','orange'][i%4];
+   return '<button class="dash-exam-row" data-exam-open="1"><span class="dash-date '+cls+'"><b>'+esc(day)+'</b><small>'+esc(mon)+'</small></span><span class="dash-exam-copy"><b>'+esc(x.name||'Ujian')+' • '+esc(x.subject||'')+'</b><small>'+esc(dt?dt.toLocaleDateString('id-ID',{weekday:'short',day:'numeric',month:'short',year:'numeric'}):'Jadwal belum diatur')+' · '+esc(timeOnly(x.startAt))+'–'+esc(timeOnly(x.endAt))+'</small></span><span class="dash-chevron">›</span></button>';
+ }).join(''):'<div class="empty compact">Belum ada jadwal ujian.</div>';
+
+ var body='<main class="wrap admin-dashboard-v166">'+
+  '<div class="dash-heading"><div><h1>Dashboard</h1><p class="muted">Ringkasan cepat pengelolaan ujian sekolah.</p></div><button class="btn outline mobile-admin-menu" id="adminQuickMenu">☰ Menu</button></div>'+
+  '<div class="admin-summary-grid">'+
+   '<button class="summary-tile tile-blue" id="mClass"><span class="summary-icon">'+uiIcon('classes')+'</span><span class="summary-copy"><b>Kelas</b><small>Kelola data kelas</small></span><strong>'+counts.classes+'</strong><span class="dash-chevron">›</span></button>'+
+   '<button class="summary-tile tile-green" id="mStudent"><span class="summary-icon">'+uiIcon('students')+'</span><span class="summary-copy"><b>Siswa</b><small>Kelola data siswa</small></span><strong>'+counts.students+'</strong><span class="dash-chevron">›</span></button>'+
+   '<button class="summary-tile tile-purple" id="mExam"><span class="summary-icon">'+uiIcon('exam')+'</span><span class="summary-copy"><b>Ujian</b><small>Kelola jadwal ujian</small></span><strong>'+counts.exams+'</strong><span class="dash-chevron">›</span></button>'+
+   '<button class="summary-tile tile-orange" id="mMonitor"><span class="summary-icon">'+uiIcon('monitor')+'</span><span class="summary-copy"><b>Control Center</b><small>Monitoring real-time</small></span><strong class="summary-word">Buka</strong><span class="dash-chevron">›</span></button>'+
+  '</div>'+
+  '<div class="dashboard-lower-grid">'+
+   '<section class="card clean-card"><div class="card-headline"><div><h2>Jadwal Ujian</h2><p class="muted">Akses cepat ke jadwal yang tersedia.</p></div><button class="text-action" id="seeAllExam">Lihat semua</button></div><div class="dash-exam-list">'+upcomingHtml+'</div></section>'+
+   '<section class="card clean-card admin-shortcuts"><div class="card-headline"><div><h2>Menu Admin</h2><p class="muted">Pengaturan dan riwayat.</p></div></div>'+
+    '<button class="shortcut-row" id="mResult"><span>'+uiIcon('result')+'</span><span><b>Hasil Ujian</b><small>Status pengerjaan & akses ulang</small></span><span>›</span></button>'+
+    '<button class="shortcut-row" id="mScores"><span>'+uiIcon('exam')+'</span><span><b>Kelola Nilai</b><small>Input, import & publikasi nilai</small></span><span>›</span></button>'+'<button class="shortcut-row" id="mQuestions"><span>'+uiIcon('result')+'</span><span><b>Bank Soal</b><small>Buat soal & media gambar</small></span><span>›</span></button>'+'<button class="shortcut-row" id="mBuilder"><span>'+uiIcon('exam')+'</span><span><b>Buat Ujian Internal</b><small>Editor soal ala formulir</small></span><span>›</span></button>'+
+    '<button class="shortcut-row" id="mBrand"><span>'+uiIcon('settings')+'</span><span><b>Identitas Sekolah</b><small>Nama aplikasi, sekolah & logo</small></span><span>›</span></button>'+
+    '<div class="shortcut-row static"><span class="status-dot green"></span><span><b>Sinkronisasi sistem</b><small>Waktu server dan database aktif</small></span><span class="pill green">Aktif</span></div>'+
+    '<div class="shortcut-row static"><span class="status-dot '+(violations?'red':'green')+'"></span><span><b>Pelanggaran tercatat</b><small>Ujian dihentikan otomatis</small></span><strong>'+violations+'</strong></div>'+
+   '</section>'+
+  '</div>'+
+  '<div class="admin-footer">© 2026 '+esc(brandName())+'</div>'+
+ '</main>';
+ top(brandName()+' — Admin',body,adminLogout,'Keluar');
+ el('mClass').onclick=classesAdmin;el('mStudent').onclick=studentsAdmin;el('mExam').onclick=examsAdmin;el('mMonitor').onclick=examControlCenter;
+ el('mResult').onclick=examResultsAdmin;el('mScores').onclick=scoresAdmin;el('mQuestions').onclick=questionBankAdmin;el('mBuilder').onclick=function(){location.href='builder.html';};el('mBrand').onclick=brandingAdmin;el('seeAllExam').onclick=examsAdmin;
+ document.querySelectorAll('[data-exam-open]').forEach(function(b){b.onclick=examsAdmin;});
+ if(el('adminQuickMenu'))el('adminQuickMenu').onclick=openAdminQuickMenu;
+}
+function openAdminQuickMenu(){
+ var d=document.createElement('div');d.className='mobile-sheet-backdrop';d.innerHTML='<div class="mobile-sheet admin-nav-sheet"><div class="sheet-handle"></div><div class="sheet-title-row"><div><h2>Menu Admin</h2><p class="muted">Pilih menu pengelolaan.</p></div><button class="sheet-close" aria-label="Tutup">×</button></div><button data-go="class">'+uiIcon('classes')+'<span><b>Kelas</b><small>Data dan password kelas</small></span><span>›</span></button><button data-go="student">'+uiIcon('students')+'<span><b>Siswa</b><small>Akun, import, approval</small></span><span>›</span></button><button data-go="exam">'+uiIcon('exam')+'<span><b>Ujian</b><small>Jadwal dan pengaturan</small></span><span>›</span></button><button data-go="monitor">'+uiIcon('monitor')+'<span><b>Control Center</b><small>Monitoring real-time</small></span><span>›</span></button><button data-go="result">'+uiIcon('result')+'<span><b>Hasil Ujian</b><small>Riwayat pengerjaan</small></span><span>›</span></button><button data-go="scores">'+uiIcon('exam')+'<span><b>Kelola Nilai</b><small>Input, import & publikasi</small></span><span>›</span></button><button data-go="questions">'+uiIcon('result')+'<span><b>Bank Soal</b><small>Buat soal & gambar</small></span><span>›</span></button><button data-go="builder">'+uiIcon('exam')+'<span><b>Buat Ujian Internal</b><small>Susun & terbitkan soal</small></span><span>›</span></button><button data-go="brand">'+uiIcon('settings')+'<span><b>Identitas</b><small>Logo dan nama sekolah</small></span><span>›</span></button><button class="sheet-logout" data-go="logout">Keluar</button></div>';
+ document.body.appendChild(d);
+ function close(){d.remove();}
+ d.onclick=function(e){if(e.target===d)close();};d.querySelector('.sheet-close').onclick=close;
+ var go={class:classesAdmin,student:studentsAdmin,exam:examsAdmin,monitor:examControlCenter,result:examResultsAdmin,scores:scoresAdmin,questions:questionBankAdmin,builder:function(){location.href='builder.html';},brand:brandingAdmin,logout:adminLogout};
+ d.querySelectorAll('[data-go]').forEach(function(b){b.onclick=function(){var fn=go[b.dataset.go];close();if(fn)fn();};});
+}
+async function adminLogout(){clearSession();try{await auth.signOut();await ensureAnon();}catch(e){}renderHome('');}
+
+async function brandingAdmin(){if(!(await isAdmin()))return adminLogin();await loadBranding();top('Identitas & Logo','<div class="wrap"><div class="card branding-admin-card"><div class="section-head"><div><h2>Identitas Aplikasi</h2><p class="muted">Semua kolom boleh dikosongkan. Logo dapat diganti kapan saja.</p></div></div><div class="branding-editor"><div class="branding-preview">'+(branding.logoDataUrl?'<img id="brandPreview" src="'+esc(branding.logoDataUrl)+'" alt="Logo">':'<div id="brandPreview" class="brand-placeholder">P</div>')+'</div><div class="branding-fields"><label>Nama Aplikasi</label><input id="brandAppName" class="input" value="'+esc(branding.appName==='PakKom Exambro'?'':branding.appName)+'" placeholder="PakKom Exambro"><label>Nama / Identitas Sekolah</label><input id="brandSchool" class="input" value="'+esc(branding.schoolName)+'" placeholder="Contoh: SMP Negeri ... (boleh kosong)"><label>Upload Logo</label><input id="brandLogoFile" class="input" type="file" accept="image/png,image/jpeg,image/webp"><div class="actions"><button class="btn green" id="saveBrand">Simpan Identitas</button><button class="btn red" id="removeLogo">Hapus Logo</button></div><div id="brandMsg"></div></div></div></div></div>',admin,'Admin');el('brandLogoFile').onchange=previewBrandLogo;el('saveBrand').onclick=saveBranding;el('removeLogo').onclick=removeBrandLogo;}
+async function resizeLogo(file){return new Promise(function(resolve,reject){var r=new FileReader();r.onload=function(){var im=new Image();im.onload=function(){var max=256,scale=Math.min(1,max/Math.max(im.width,im.height)),w=Math.max(1,Math.round(im.width*scale)),h=Math.max(1,Math.round(im.height*scale)),c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(im,0,0,w,h);resolve(c.toDataURL('image/png'));};im.onerror=reject;im.src=r.result;};r.onerror=reject;r.readAsDataURL(file);});}
+async function previewBrandLogo(){var f=el('brandLogoFile').files[0];if(!f)return;try{var data=await resizeLogo(f),old=el('brandPreview');if(old){var img=document.createElement('img');img.id='brandPreview';img.src=data;img.alt='Logo';old.replaceWith(img);}el('brandLogoFile').dataset.preview=data;}catch(e){msg('brandMsg','Logo tidak dapat dibaca.');}}
+async function saveBranding(){var appName=el('brandAppName').value.trim()||'PakKom Exambro',school=el('brandSchool').value.trim(),preview=el('brandLogoFile').dataset.preview||branding.logoDataUrl;try{await db.collection('settings').doc('branding').set({appName:appName,schoolName:school,logoDataUrl:preview,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});await loadBranding();await pakkomAlert('Identitas aplikasi berhasil disimpan.');brandingAdmin();}catch(e){msg('brandMsg','Gagal menyimpan: '+(e.code||e.message));}}
+async function removeBrandLogo(){var ok=await pakkomConfirm('Hapus logo dari aplikasi?');if(!ok)return;try{await db.collection('settings').doc('branding').set({logoDataUrl:'',updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});await loadBranding();brandingAdmin();}catch(e){pakkomAlert('Logo gagal dihapus: '+(e.code||e.message));}}
+
+async function syncClassesFromExistingStudents(){
+ if(!(await isAdmin()))return 0;
+ var ss=await db.collection('students').get();
+ var ids=[...new Set(ss.docs.map(function(d){return String((d.data()||{}).classId||'').trim().toUpperCase();}).filter(Boolean))].sort();
+ var created=0;
+ for(var i=0;i<ids.length;i++){
+  try{if(await ensureClassExists(ids[i]))created++;}catch(e){console.warn('sync class '+ids[i],e);}
+ }
+ return created;
+}
+
+
+async function syncClassesFromStudents(){
+  if(!(await isAdmin())) return 0;
+  try{
+    var s = await db.collection('students').get();
+    var classIds = [...new Set(
+      s.docs.map(function(d){
+        return String((d.data().classId || '')).trim().toUpperCase();
+      }).filter(Boolean)
+    )];
+
+    var created = 0;
+    for(var i=0;i<classIds.length;i++){
+      var id = classIds[i];
+      var ref = db.collection('classes').doc(id);
+      var d = await ref.get();
+
+      if(!d.exists){
+        await ref.set({
+          name: id,
+          passwordHash: await sha256('123456'),
+          active: true,
+          createdFrom: 'student-sync',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await saveClassCredential(id, '123456');
+        created++;
+      }
+    }
+    return created;
+  }catch(e){
+    console.error('syncClassesFromStudents failed:', e);
+    throw e;
+  }
+}
+
+async function getClassCredential(id){
+ try{
+  var d=await db.collection('classCredentials').doc(id).get();
+  return d.exists?String(d.data().password||''):'';
+ }catch(e){
+  console.error('classCredentials read failed',e);
+  throw e;
+ }
+}
+async function getStudentCredentials(){
+ var map={};
+ try{
+  var s=await db.collection('studentCredentials').get();
+  s.docs.forEach(function(d){map[d.id]=String(d.data().password||'');});
+  return map;
+ }catch(e){
+  console.error('studentCredentials read failed',e);
+  throw e;
+ }
+}
+async function saveClassCredential(id,password){await db.collection('classCredentials').doc(id).set({password:String(password),updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});}
+async function saveStudentCredential(id,password){await db.collection('studentCredentials').doc(id).set({password:String(password),updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});}
+async function classesAdmin(){
+ if(!(await isAdmin()))return adminLogin();
+ try{
+   await syncClassesFromStudents();
+ }catch(e){
+   console.error(e);
+   return pakkomAlert('Kelola Kelas gagal dibuka: '+(e && e.message ? e.message : 'gagal sinkronisasi kelas.'));
+ }
+ var s=await db.collection('classes').get();
+ var cred={};
+ try{
+  var credSnap=await db.collection('classCredentials').get();
+  credSnap.docs.forEach(function(d){cred[d.id]=String(d.data().password||'');});
+ }catch(e){
+  return pakkomAlert('Password kelas tidak dapat dimuat. Pastikan Firestore Rules V18.0 sudah dipublish. '+(e.code||e.message));
+ }
+ var rows=s.docs.sort(function(a,b){return a.id.localeCompare(b.id);}).map(function(d){var x=d.data(),pw=cred[d.id]||'';return '<tr><td><b>'+esc(d.id)+'</b></td><td>'+esc(x.name||d.id)+'</td><td><span class="admin-password">'+(pw?esc(pw):'<span class="muted">Belum tersimpan</span>')+'</span></td><td>'+(x.active===false?'Nonaktif':'Aktif')+'</td><td><button class="btn gray small class-edit" data-id="'+esc(d.id)+'">Edit</button> <button class="btn small '+(x.active===false?'green':'orange')+' class-toggle" data-id="'+esc(d.id)+'" data-active="'+(x.active===false?'0':'1')+'">'+(x.active===false?'Aktifkan':'Nonaktifkan')+'</button></td></tr>';}).join('');
+ top('Kelola Kelas','<div class="wrap"><div class="card"><h2>Tambah Kelas</h2><div class="grid"><input id="cid" class="input" placeholder="Kode kelas, contoh 7A"><input id="cname" class="input" placeholder="Nama kelas"><input id="cpass" class="input" value="123456" placeholder="Password kelas"></div><button class="btn green" id="saveClassBtn">Tambah Kelas</button></div><div class="card"><div class="notice"><b>Password kelas</b> hanya ditampilkan kepada admin. Kelas lama yang sebelumnya hanya menyimpan hash akan bertuliskan <b>Belum tersimpan</b>; klik Edit lalu tetapkan password baru agar dapat ditampilkan.</div><div class="table-wrap"><table><thead><tr><th>Kode</th><th>Nama</th><th>Password</th><th>Status</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table></div></div></div>',admin,'Admin');
+ el('saveClassBtn').onclick=saveClass;document.querySelectorAll('.class-edit').forEach(function(b){b.onclick=function(){editClass(this.dataset.id);};});document.querySelectorAll('.class-toggle').forEach(function(b){b.onclick=function(){toggleClass(this.dataset.id,this.dataset.active==='1');};});
+}
+async function saveClass(){var id=el('cid').value.trim().toUpperCase(),name=el('cname').value.trim(),p=el('cpass').value;if(!id||p.length<6){alert('Kode kelas dan password minimal 6 karakter wajib.');return;}await db.collection('classes').doc(id).set({name:name||id,passwordHash:await sha256(p),password:firebase.firestore.FieldValue.delete(),demoPassword:firebase.firestore.FieldValue.delete(),active:true,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});await saveClassCredential(id,p);classesAdmin();}
+async function editClass(id){
+ var d=await db.collection('classes').doc(id).get();if(!d.exists)return pakkomAlert('Kelas tidak ditemukan.');var x=d.data(),current=await getClassCredential(id);
+ top('Edit Kelas','<div class="wrap"><div class="card"><h2>'+esc(id)+'</h2><label>Nama Kelas</label><input id="editClassName" class="input" value="'+esc(x.name||id)+'"><label>Password Kelas</label><input id="editClassPass" class="input" type="text" value="'+esc(current)+'" placeholder="Masukkan password baru"><p class="muted">Password yang tersimpan dapat dilihat admin. Jika kosong karena kelas dibuat pada versi lama, masukkan password baru untuk menyimpannya.</p><div class="actions"><button class="btn green" id="saveClassEdit">Simpan</button><button class="btn gray" id="cancelClassEdit">Batal</button></div></div></div>',classesAdmin,'Kelola Kelas');
+ el('cancelClassEdit').onclick=classesAdmin;el('saveClassEdit').onclick=async function(){var name=el('editClassName').value.trim()||id,p=el('editClassPass').value;if(p&&p.length<6)return pakkomAlert('Password minimal 6 karakter.');var data={name:name,updatedAt:firebase.firestore.FieldValue.serverTimestamp()};if(p){data.passwordHash=await sha256(p);data.password=firebase.firestore.FieldValue.delete();data.demoPassword=firebase.firestore.FieldValue.delete();}await db.collection('classes').doc(id).update(data);if(p)await saveClassCredential(id,p);await pakkomAlert('Kelas berhasil diperbarui.');classesAdmin();};
+}
+async function toggleClass(id,active){await db.collection('classes').doc(id).update({active:!active,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});classesAdmin();}
+async function ensureClassExists(id){
+ id=String(id||'').trim().toUpperCase();if(!id)return false;
+ var ref=db.collection('classes').doc(id),d=await ref.get();if(d.exists)return false;
+ await ref.set({name:id,passwordHash:await sha256('123456'),active:true,createdFrom:'student-import',createdAt:firebase.firestore.FieldValue.serverTimestamp()});await saveClassCredential(id,'123456');return true;
+}
+
+async function studentsAdmin(){
+ if(!(await isAdmin()))return adminLogin();
+ var s=await db.collection('students').get();
+ try{
+  window.adminStudentPasswords=await getStudentCredentials();
+ }catch(e){
+  return pakkomAlert('Password siswa tidak dapat dimuat. Pastikan Firestore Rules V18.0 sudah dipublish. '+(e.code||e.message));
+ }
+ adminStudents=s.docs.map(function(d){return Object.assign({id:d.id},d.data());}).sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''));});var classes=[...new Set(adminStudents.map(function(x){return x.classId;}).filter(Boolean))].sort();top('Kelola Siswa','<div class="wrap"><div class="card"><h2>Tambah Manual</h2><div class="grid"><input id="anIS" class="input" placeholder="NIS"><input id="anName" class="input" placeholder="Nama"><input id="anClass" class="input" placeholder="Kelas"><input id="anPass" class="input" placeholder="Password (default 123456)"></div><button class="btn green" id="addManual">Tambah Siswa</button></div><div class="card"><h2>Upload Excel</h2><p class="muted">Kolom: NIS | Nama | Kelas | Password. Password siswa kosong = 123456. Kelas yang belum ada dibuat otomatis dengan password kelas 123456.</p><input id="excelFile" class="input" type="file" accept=".xlsx,.xls,.csv"><div class="actions"><button class="btn" id="importExcel">Upload Data</button><button class="btn gray" id="templateExcel">Download Template</button></div><div id="importMsg"></div></div><div class="card"><div class="grid"><input id="studentSearch" class="input" placeholder="Cari NIS/nama"><select id="studentFilter"><option value="">Semua kelas</option>'+classes.map(function(c){return '<option>'+esc(c)+'</option>';}).join('')+'</select></div><div class="bulk-bar"><span id="bulkCount">0 dipilih</span><div class="actions"><button class="btn green small" id="bulkApprove" disabled>Approve</button><button class="btn gray small" id="bulkActivate" disabled>Aktifkan</button><button class="btn orange small" id="bulkDeactivate" disabled>Nonaktifkan</button><button class="btn red small" id="bulkDelete" disabled>Hapus</button></div></div><div id="studentTable"></div></div></div>',admin,'Admin');el('addManual').onclick=addStudentManual;el('importExcel').onclick=importExcel;el('templateExcel').onclick=downloadTemplate;el('studentSearch').oninput=renderStudents;el('studentFilter').onchange=renderStudents;el('bulkApprove').onclick=function(){bulkStudents('approve');};el('bulkActivate').onclick=function(){bulkStudents('activate');};el('bulkDeactivate').onclick=function(){bulkStudents('deactivate');};el('bulkDelete').onclick=function(){bulkStudents('delete');};renderStudents();}
+function selectedStudentIds(){return Array.prototype.map.call(document.querySelectorAll('.student-check:checked'),function(c){return c.dataset.id;});}
+function updateBulkBar(){var ids=selectedStudentIds(),c=el('bulkCount');if(c)c.textContent=ids.length+' dipilih';if(el('bulkApprove'))el('bulkApprove').disabled=!ids.length;if(el('bulkDelete'))el('bulkDelete').disabled=!ids.length;if(el('bulkActivate'))el('bulkActivate').disabled=!ids.length;if(el('bulkDeactivate'))el('bulkDeactivate').disabled=!ids.length;}
+function renderStudents(){var q=(el('studentSearch')?el('studentSearch').value:'').toLowerCase().trim(),f=el('studentFilter')?el('studentFilter').value:'';var rows=adminStudents.filter(function(x){return (!f||x.classId===f)&&(!q||String(x.nis||'').toLowerCase().includes(q)||String(x.name||'').toLowerCase().includes(q));});el('studentTable').innerHTML='<p class="muted">'+rows.length+' siswa • '+rows.filter(function(x){return x.approved!==true;}).length+' menunggu approval</p><div class="table-wrap"><table class="table"><tr><th><input type="checkbox" id="checkAllStudents" aria-label="Pilih semua"></th><th>NIS</th><th>Nama</th><th>Kelas</th><th>Password</th><th>Approval</th><th>Status</th><th>Aksi</th></tr>'+rows.map(function(x){return '<tr><td><input type="checkbox" class="student-check" data-id="'+esc(x.id)+'"></td><td>'+esc(x.nis)+'</td><td>'+esc(x.name)+'</td><td>'+esc(x.classId)+'</td><td>'+(x.passwordAdminVisible===false?'<span class="muted">Diubah siswa</span>':((window.adminStudentPasswords||{})[x.id]?'<span class="admin-password">'+esc((window.adminStudentPasswords||{})[x.id])+'</span>':'<span class="muted">Belum tersimpan</span>'))+'</td><td>'+(x.approved===true?'<span class="pill green">Disetujui</span>':'<span class="pill orange">Menunggu</span>')+'</td><td>'+(x.active===true?'Aktif':'Nonaktif')+'</td><td><div class="actions">'+(x.approved!==true?'<button class="btn green small approve" data-id="'+esc(x.id)+'">Approve</button>':'')+'<button class="btn gray small reset" data-id="'+esc(x.id)+'">Reset Password</button><button class="btn orange small toggle" data-id="'+esc(x.id)+'" data-active="'+(x.active===true?'1':'0')+'">'+(x.active===true?'Nonaktifkan':'Aktifkan')+'</button><button class="btn red small delete-student" data-id="'+esc(x.id)+'" data-name="'+esc(x.name||x.nis)+'">Hapus</button></div></td></tr>';}).join('')+'</table></div>';var all=el('checkAllStudents');if(all)all.onchange=function(){document.querySelectorAll('.student-check').forEach(function(c){c.checked=all.checked;});updateBulkBar();};document.querySelectorAll('.student-check').forEach(function(c){c.onchange=updateBulkBar;});document.querySelectorAll('.approve').forEach(function(b){b.onclick=function(){approveStudent(b.dataset.id);};});document.querySelectorAll('.reset').forEach(function(b){b.onclick=function(){resetStudent(b.dataset.id);};});document.querySelectorAll('.toggle').forEach(function(b){b.onclick=function(){toggleStudent(b.dataset.id,b.dataset.active==='1');};});document.querySelectorAll('.delete-student').forEach(function(b){b.onclick=function(){deleteStudent(b.dataset.id,b.dataset.name);};});updateBulkBar();}
+async function deleteStudent(id,name){var ok=await pakkomConfirm('Hapus akun siswa '+name+'? Data akun akan dihapus permanen.');if(!ok)return;try{await db.collection('students').doc(id).delete();try{await db.collection('studentCredentials').doc(id).delete();}catch(_e){}var aq=await db.collection('examAttempts').where('studentId','==',id).get();for(var i=0;i<aq.docs.length;i+=400){var batch=db.batch();aq.docs.slice(i,i+400).forEach(function(d){batch.delete(d.ref);});await batch.commit();}studentsAdmin();}catch(e){pakkomAlert('Siswa gagal dihapus: '+(e.code||e.message));}}
+async function bulkStudents(action){var ids=selectedStudentIds();if(!ids.length)return;var label=action==='approve'?'approve':action==='activate'?'aktifkan':action==='deactivate'?'nonaktifkan':'hapus',ok=await pakkomConfirm(label.charAt(0).toUpperCase()+label.slice(1)+' '+ids.length+' siswa terpilih?');if(!ok)return;try{for(var i=0;i<ids.length;i+=400){var batch=db.batch();ids.slice(i,i+400).forEach(function(id){var ref=db.collection('students').doc(id);if(action==='approve')batch.update(ref,{approved:true,active:true,approvedAt:firebase.firestore.FieldValue.serverTimestamp()});else if(action==='activate')batch.update(ref,{active:true});else if(action==='deactivate')batch.update(ref,{active:false});else batch.delete(ref);});await batch.commit();}if(action==='delete'){for(var j=0;j<ids.length;j++){try{await db.collection('studentCredentials').doc(ids[j]).delete();}catch(_e){}var q=await db.collection('examAttempts').where('studentId','==',ids[j]).get();for(var k=0;k<q.docs.length;k+=400){var b2=db.batch();q.docs.slice(k,k+400).forEach(function(d){b2.delete(d.ref);});await b2.commit();}}}studentsAdmin();}catch(e){pakkomAlert('Aksi massal gagal: '+(e.code||e.message));}}
+async function approveStudent(id){await db.collection('students').doc(id).update({approved:true,active:true,approvedAt:firebase.firestore.FieldValue.serverTimestamp()});studentsAdmin();}
+async function addStudentManual(){var nis=el('anIS').value.trim(),name=el('anName').value.trim(),cls=el('anClass').value.trim().toUpperCase(),p=el('anPass').value||'123456';if(!nis||!name||!cls||p.length<6)return alert('NIS, nama, kelas dan password minimal 6 karakter wajib.');var q=await db.collection('students').where('nis','==',nis).limit(1).get();if(!q.empty)return alert('NIS sudah terdaftar.');await ensureClassExists(cls);var ref=db.collection('students').doc();await ref.set({nis:nis,name:name,classId:cls,passwordHash:await sha256(p),passwordAdminVisible:true,active:true,approved:true,registrationSource:'admin-manual',createdAt:firebase.firestore.FieldValue.serverTimestamp()});await saveStudentCredential(ref.id,p);studentsAdmin();}
+async function resetStudent(id){var p=prompt('Password baru:','123456');if(p===null)return;if(p.length<6)return alert('Password minimal 6 karakter.');await db.collection('students').doc(id).update({passwordHash:await sha256(p),password:firebase.firestore.FieldValue.delete(),passwordAdminVisible:true,passwordUpdatedAt:firebase.firestore.FieldValue.serverTimestamp()});await saveStudentCredential(id,p);alert('Password diperbarui dan dapat dilihat admin.');studentsAdmin();}
+async function toggleStudent(id,a){await db.collection('students').doc(id).update({active:!a});studentsAdmin();}
+function downloadTemplate(){var ws=XLSX.utils.aoa_to_sheet([['NIS','Nama','Kelas','Password'],['10001','Contoh Siswa','7A','123456']]);var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Siswa');XLSX.writeFile(wb,'Template-Siswa-PakKom.xlsx');}
+function normKey(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
+function pick(r,names){var m={};Object.keys(r).forEach(function(k){m[normKey(k)]=r[k];});for(var i=0;i<names.length;i++){if(m[normKey(names[i])]!==undefined)return m[normKey(names[i])];}return '';}
+function importExcel(){var file=el('excelFile').files[0];if(!file)return msg('importMsg','Pilih file Excel/CSV terlebih dahulu.');var rd=new FileReader();rd.onload=async function(ev){var rows;try{var wb=XLSX.read(ev.target.result,{type:'array'}),ws=wb.Sheets[wb.SheetNames[0]];rows=XLSX.utils.sheet_to_json(ws,{defval:'',raw:false});}catch(e){return msg('importMsg','File gagal dibaca: '+e.message);}try{await processRows(rows);}catch(e){var detail=(e&&e.code==='permission-denied')?'Izin Firestore menolak penambahan siswa. Pastikan Firestore Rules V16.1 sudah dipublish.':(e.code||e.message);msg('importMsg','Upload data siswa gagal: '+detail);}};rd.onerror=function(){msg('importMsg','File tidak dapat dibuka oleh browser.');};rd.readAsArrayBuffer(file);}
+async function processRows(rows){var existing={};adminStudents.forEach(function(x){existing[String(x.nis||'').trim()]=1;});var seen={},valid=[],bad=0,dup=0;for(var i=0;i<rows.length;i++){var r=rows[i],nis=String(pick(r,['NIS','Nomor Induk Siswa','Nomor Induk'])||'').trim(),name=String(pick(r,['Nama','Nama Siswa','Nama Lengkap'])||'').trim(),cls=String(pick(r,['Kelas','Class','ClassId'])||'').trim().toUpperCase(),p=String(pick(r,['Password','Pass','Kata Sandi'])||'').trim()||'123456';if(!nis||!name||!cls||p.length<6){bad++;continue;}if(existing[nis]||seen[nis]){dup++;continue;}seen[nis]=1;valid.push({nis:nis,name:name,classId:cls,passwordHash:await sha256(p),_adminPassword:p,passwordAdminVisible:true,active:true,approved:true,registrationSource:'admin-import'});}if(!valid.length)return msg('importMsg','Tidak ada data baru. Duplikat: '+dup+', tidak valid: '+bad+'.');if(!confirm('Tambahkan '+valid.length+' siswa? Kelas yang belum ada akan dibuat otomatis dengan password 123456.'))return;msg('importMsg','Menyiapkan kelas dan mengunggah '+valid.length+' siswa…','info');var classIds=[...new Set(valid.map(function(x){return x.classId;}))];var newClasses=0;for(var ci=0;ci<classIds.length;ci++){if(await ensureClassExists(classIds[ci]))newClasses++;}for(var start=0;start<valid.length;start+=400){var batch=db.batch();valid.slice(start,start+400).forEach(function(x){var ref=db.collection('students').doc(),studentData=Object.assign({},x,{createdAt:firebase.firestore.FieldValue.serverTimestamp()});delete studentData._adminPassword;batch.set(ref,studentData);batch.set(db.collection('studentCredentials').doc(ref.id),{password:String(x._adminPassword),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});});await batch.commit();}msg('importMsg','Selesai: '+valid.length+' siswa ditambahkan. Kelas baru: '+newClasses+' (password awal 123456). Duplikat: '+dup+', tidak valid: '+bad+'.','success');setTimeout(studentsAdmin,600);}
+
+async function examControlCenter(){
+ if(!(await isAdmin()))return adminLogin();stopRealtimeMonitor();await syncServerClock();
+ var first=await Promise.all([db.collection('examPublic').get(),db.collection('students').get(),db.collection('examAttempts').get()]);
+ window.__pakkomMonitorData={exams:first[0].docs.map(function(d){return Object.assign({id:d.id},d.data());}),students:first[1].docs.map(function(d){return Object.assign({id:d.id},d.data());}),attempts:first[2].docs.map(function(d){return Object.assign({id:d.id},d.data());})};
+ top('Exam Control Center','<div class="wrap"><div class="card control-head"><div class="section-head"><div><h2>Monitoring Ujian Real-time</h2><p class="muted">Status diperbarui otomatis. '+serverClockLabel()+' digunakan untuk menentukan jadwal.</p></div><span class="live-indicator"><i></i> LIVE</span></div><div class="grid result-filter-grid"><select id="monitorExam"></select><select id="monitorClass"><option value="">Semua kelas</option></select></div><div id="monitorSummary"></div></div><div class="card"><div id="monitorTable"></div></div></div>',function(){stopRealtimeMonitor();admin();},'Admin');
+ populateMonitorFilters();renderMonitor();
+ monitorUnsubs.push(db.collection('examPublic').onSnapshot(function(q){window.__pakkomMonitorData.exams=q.docs.map(function(d){return Object.assign({id:d.id},d.data());});populateMonitorFilters(true);renderMonitor();}));
+ monitorUnsubs.push(db.collection('students').onSnapshot(function(q){window.__pakkomMonitorData.students=q.docs.map(function(d){return Object.assign({id:d.id},d.data());});populateMonitorFilters(true);renderMonitor();}));
+ monitorUnsubs.push(db.collection('examAttempts').onSnapshot(function(q){window.__pakkomMonitorData.attempts=q.docs.map(function(d){return Object.assign({id:d.id},d.data());});renderMonitor();}));
+}
+function populateMonitorFilters(preserve){
+ var d=window.__pakkomMonitorData||{exams:[],students:[]},exSel=el('monitorExam'),clSel=el('monitorClass');if(!exSel||!clSel)return;
+ var oldE=preserve?exSel.value:'',oldC=preserve?clSel.value:'';
+ var exs=sortExamsBySchedule(d.exams).slice().reverse(),classes=[...new Set(d.students.map(function(x){return x.classId;}).filter(Boolean))].sort(function(a,b){return String(a).localeCompare(String(b),undefined,{numeric:true});});
+ exSel.innerHTML='<option value="">Pilih ujian</option>'+exs.map(function(x){return '<option value="'+esc(x.id)+'">'+esc(x.name)+' — '+esc(dateInfo(x.startAt).short)+' '+esc(timeOnly(x.startAt))+'</option>';}).join('');
+ clSel.innerHTML='<option value="">Semua kelas</option>'+classes.map(function(c){return '<option value="'+esc(c)+'">'+esc(c)+'</option>';}).join('');
+ if(oldE&&d.exams.some(function(x){return x.id===oldE;}))exSel.value=oldE;else if(exs.length)exSel.value=exs[0].id;if(oldC)clSel.value=oldC;
+ exSel.onchange=renderMonitor;clSel.onchange=renderMonitor;
+}
+function monitorRows(){
+ var d=window.__pakkomMonitorData||{exams:[],students:[],attempts:[]},eid=el('monitorExam')?el('monitorExam').value:'',cls=el('monitorClass')?el('monitorClass').value:'';if(!eid)return [];
+ var ex=d.exams.find(function(x){return String(x.id)===String(eid);});if(!ex)return [];
+ var amap={};d.attempts.forEach(function(a){amap[String(a.studentId)+'__'+String(a.examId)]=a;});
+ return d.students.filter(function(st){return st.approved===true&&st.active===true&&(!cls||String(st.classId)===cls)&&(!Array.isArray(ex.allowedClasses)||!ex.allowedClasses.length||ex.allowedClasses.indexOf(st.classId)>=0);}).map(function(st){var at=amap[String(st.id)+'__'+String(ex.id)]||null,ended=toDate(ex.endAt)&&nowMs()>toDate(ex.endAt).getTime(),status=at&&at.status==='completed'?'completed':at&&at.status==='in_progress'?'in_progress':ended?'missed':'not_started';return {student:st,exam:ex,attempt:at,status:status};}).sort(function(a,b){return String(a.student.classId||'').localeCompare(String(b.student.classId||''),undefined,{numeric:true})||String(a.student.name||'').localeCompare(String(b.student.name||''));});
+}
+function violationLogHtml(at){var logs=at&&Array.isArray(at.violationLog)?at.violationLog:[];if(!logs.length)return '<span class="muted">—</span>';return '<details class="violation-log"><summary>'+logs.length+' catatan</summary>'+logs.map(function(v){var dt=v.at?new Date(v.at):null;return '<div><b>Peringatan '+esc(v.count||'')+'</b><span>'+(dt&&!isNaN(dt)?esc(dt.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',second:'2-digit'}).replace(/\\./g,':')):'-')+' • '+esc(v.label||v.type||'Pelanggaran')+'</span></div>';}).join('')+'</details>';}
+function renderMonitor(){
+ var rows=monitorRows();if(!el('monitorTable'))return;
+ var counts={not_started:0,missed:0,in_progress:0,completed:0,violations:0};rows.forEach(function(r){counts[r.status]++;if(r.attempt&&(r.attempt.violationCount>0||r.attempt.completionReason==='left_exam_twice'))counts.violations++;});
+ el('monitorSummary').innerHTML='<div class="result-stats result-stats-polish"><div class="stat-chip stat-wait"><b>'+counts.not_started+'</b><span>Belum Ujian</span></div><div class="stat-chip stat-live"><b>'+counts.in_progress+'</b><span>Sedang Mengerjakan</span></div><div class="stat-chip stat-done"><b>'+counts.completed+'</b><span>Selesai</span></div><div class="stat-chip stat-missed"><b>'+counts.missed+'</b><span>Tidak Ujian</span></div><div class="stat-chip stat-violation"><b>'+counts.violations+'</b><span>Ada Pelanggaran</span></div><div class="stat-chip stat-total"><b>'+rows.length+'</b><span>Peserta</span></div></div>';
+ function sh(r){if(r.status==='in_progress')return '<span class="pill green">Sedang Mengerjakan</span>';if(r.status==='completed'){var v=r.attempt&&(r.attempt.completionReason==='left_exam_twice'||r.attempt.autoCompleted);return '<span class="pill '+(v?'red':'orange')+'">'+(v?'Selesai • Pelanggaran':'Selesai')+'</span>';}if(r.status==='missed')return '<span class="pill gray">Tidak Ujian</span>';return '<span class="pill gray">Belum Ujian</span>';}
+ var table='<div class="table-wrap"><table class="table monitor-table"><tr><th>Kelas</th><th>NIS</th><th>Nama</th><th>Status</th><th>Mulai</th><th>Selesai</th><th>Pelanggaran</th><th>Aksi</th></tr>'+rows.map(function(r){var at=r.attempt;return '<tr><td>'+esc(r.student.classId||'-')+'</td><td>'+esc(r.student.nis||'-')+'</td><td><b>'+esc(r.student.name||'-')+'</b></td><td>'+sh(r)+'</td><td>'+esc(formatClock(at&&at.startedAt))+'</td><td>'+esc(formatClock(at&&at.completedAt))+'</td><td>'+violationLogHtml(at)+'</td><td>'+(at?'<button class="btn green small monitor-reset" data-id="'+esc(at.id)+'" data-name="'+esc(r.student.name||r.student.nis)+'">Izinkan Ulang</button>':'<span class="muted">—</span>')+'</td></tr>';}).join('')+'</table></div>';
+ el('monitorTable').innerHTML=rows.length?table:'<div class="empty">Pilih ujian atau belum ada peserta.</div>';
+ document.querySelectorAll('.monitor-reset').forEach(function(b){b.onclick=function(){resetExamAttempt(b.dataset.id,b.dataset.name,true);};});
+}
+
+async function examResultsAdmin(){
+ if(!(await isAdmin()))return adminLogin();
+ var data=await Promise.all([db.collection('examPublic').get(),db.collection('students').get(),db.collection('examAttempts').get()]);
+ var exams=data[0].docs.map(function(d){return Object.assign({id:d.id},d.data());}).sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''));});
+ var students=data[1].docs.map(function(d){return Object.assign({id:d.id},d.data());});
+ var attempts=data[2].docs.map(function(d){return Object.assign({id:d.id},d.data());});
+ var classes=[...new Set(students.map(function(x){return x.classId;}).filter(Boolean))].sort(function(a,b){return String(a).localeCompare(String(b),undefined,{numeric:true});});
+ window.__pakkomResultData={exams:exams,students:students,attempts:attempts};
+ top('Hasil Pengerjaan Ujian','<div class="wrap"><div class="card result-filter-card"><div class="section-head"><div><h2>Status Pengerjaan Siswa</h2><p class="muted">Belum Ujian = jadwal belum berakhir dan belum membuka soal. Tidak Ujian = jadwal sudah lewat tanpa aktivitas pengerjaan. Status pelanggaran ditandai khusus.</p></div></div><div class="grid result-filter-grid"><select id="resultExam"><option value="">Semua ujian</option>'+exams.map(function(x){return '<option value="'+esc(x.id)+'">'+esc(x.name)+'</option>';}).join('')+'</select><select id="resultClass"><option value="">Semua kelas</option>'+classes.map(function(c){return '<option value="'+esc(c)+'">'+esc(c)+'</option>';}).join('')+'</select></div><div id="resultSummary"></div></div><div class="card"><div id="resultTable"></div></div></div>',admin,'Admin');
+ el('resultExam').onchange=renderExamResults;el('resultClass').onchange=renderExamResults;renderExamResults();
+}
+function renderExamResults(){
+ var d=window.__pakkomResultData||{exams:[],students:[],attempts:[]},eid=el('resultExam')?el('resultExam').value:'',cls=el('resultClass')?el('resultClass').value:'';
+ var attemptMap={};
+ d.attempts.forEach(function(a){attemptMap[String(a.studentId)+'__'+String(a.examId)]=a;});
+ var selectedExams=d.exams.filter(function(e){return !eid||String(e.id)===eid;});
+ var selectedStudents=d.students.filter(function(st){return st.approved===true&&st.active===true&&(!cls||String(st.classId)===cls);});
+ var rows=[];
+ selectedExams.forEach(function(ex){
+   selectedStudents.forEach(function(st){
+     var allowed=!Array.isArray(ex.allowedClasses)||!ex.allowedClasses.length||ex.allowedClasses.indexOf(st.classId)>=0;
+     if(!allowed)return;
+     var at=attemptMap[String(st.id)+'__'+String(ex.id)]||null;
+     var ended=toDate(ex.endAt)&&nowMs()>toDate(ex.endAt).getTime();rows.push({student:st,exam:ex,attempt:at,status:at&&at.status==='completed'?'completed':at&&at.status==='in_progress'?'in_progress':ended?'missed':'not_started'});
+   });
+ });
+ rows.sort(function(a,b){return String(a.student.classId||'').localeCompare(String(b.student.classId||''),undefined,{numeric:true})||String(a.student.name||a.student.nis||'').localeCompare(String(b.student.name||b.student.nis||''))||String(a.exam.name||'').localeCompare(String(b.exam.name||''));});
+ var completed=rows.filter(function(r){return r.status==='completed';}).length;
+ var inprogress=rows.filter(function(r){return r.status==='in_progress';}).length;
+ var notstarted=rows.filter(function(r){return r.status==='not_started';}).length;
+ var missed=rows.filter(function(r){return r.status==='missed';}).length;
+ var violations=rows.filter(function(r){return r.status==='completed'&&r.attempt&&(r.attempt.completionReason==='left_exam_twice'||r.attempt.autoCompleted===true);}).length;
+ if(el('resultSummary'))el('resultSummary').innerHTML='<div class="result-stats result-stats-polish"><div class="stat-chip stat-wait"><b>'+notstarted+'</b><span>Belum Ujian</span></div><div class="stat-chip stat-missed"><b>'+missed+'</b><span>Tidak Ujian</span></div><div class="stat-chip stat-live"><b>'+inprogress+'</b><span>Sedang Mengerjakan</span></div><div class="stat-chip stat-done"><b>'+completed+'</b><span>Sudah Ujian</span></div><div class="stat-chip stat-violation"><b>'+violations+'</b><span>Pelanggaran</span></div><div class="stat-chip stat-total"><b>'+rows.length+'</b><span>Total Peserta</span></div></div>';
+ function statusHTML(r){if(r.status==='completed'){var v=r.attempt&&(r.attempt.completionReason==='left_exam_twice'||r.attempt.autoCompleted===true);return '<span class="pill '+(v?'red':'orange')+'">'+(v?'Sudah Ujian • Pelanggaran':'Sudah Ujian')+'</span>';}if(r.status==='in_progress')return '<span class="pill green">Sedang Mengerjakan</span>';if(r.status==='missed')return '<span class="pill gray">Tidak Ujian</span>';return '<span class="pill gray">Belum Ujian</span>';}
+ function noteHTML(r){if(r.status==='completed'&&r.attempt&&(r.attempt.completionReason==='left_exam_twice'||r.attempt.autoCompleted===true))return '<div class="violation-text">Otomatis dikunci: keluar/pindah tab 2×</div>'+violationLogHtml(r.attempt);if(r.status==='missed')return '<span class="muted">Jadwal berakhir tanpa pengerjaan</span>';return '<span class="muted">—</span>'; }
+ function actionHTML(r){return r.status==='completed'&&r.attempt?'<button class="btn green small result-reset" data-id="'+esc(r.attempt.id)+'" data-name="'+esc(r.student.name||r.student.nis||'siswa')+'">Aktifkan Ulang</button>':'<span class="muted">—</span>';}
+ var table='<div class="result-desktop"><div class="table-wrap"><table class="table"><tr><th>Kelas</th><th>NIS</th><th>Nama</th><th>Ujian</th><th>Status</th><th>Keterangan</th><th>Aksi</th></tr>'+rows.map(function(r){return '<tr><td>'+esc(r.student.classId||'-')+'</td><td>'+esc(r.student.nis||'-')+'</td><td><b>'+esc(r.student.name||'-')+'</b></td><td>'+esc(r.exam.name||'-')+'</td><td>'+statusHTML(r)+'</td><td>'+noteHTML(r)+'</td><td>'+actionHTML(r)+'</td></tr>';}).join('')+'</table></div></div>';
+ var cards='<div class="result-mobile">'+rows.map(function(r){return '<article class="result-student-card '+esc(r.status)+'"><div class="result-card-head"><div><b>'+esc(r.student.name||'-')+'</b><span>NIS '+esc(r.student.nis||'-')+' • Kelas '+esc(r.student.classId||'-')+'</span></div>'+statusHTML(r)+'</div><div class="result-card-exam">'+esc(r.exam.name||'-')+'</div><div class="result-card-note">'+noteHTML(r)+'</div><div class="result-card-action">'+actionHTML(r)+'</div></article>';}).join('')+'</div>';
+ var html=rows.length?table+cards:'<div class="empty">Tidak ada peserta untuk ujian/kelas yang dipilih.</div>';
+ if(el('resultTable'))el('resultTable').innerHTML=html;
+ document.querySelectorAll('.result-reset').forEach(function(b){b.onclick=function(){resetExamAttempt(b.dataset.id,b.dataset.name);};});
+}
+async function resetExamAttempt(id,name,fromMonitor){
+ var ok=await pakkomConfirm('Aktifkan kembali akses ujian untuk '+name+'? Status Sudah Ujian akan dihapus sehingga siswa dapat memulai ujian lagi.','PakKom Exambro');if(!ok)return;
+ try{await db.collection('examAttempts').doc(id).delete();await pakkomAlert('Akses ujian siswa sudah diaktifkan kembali.');if(fromMonitor)renderMonitor();else examResultsAdmin();}catch(e){pakkomAlert('Gagal mengaktifkan kembali: '+(e.code||e.message));}
+}
+
+function examAdminStatus(x){var n=nowMs(),st=toDate(x.startAt),en=toDate(x.endAt);if(x.archived===true)return {label:'Diarsipkan',cls:'gray'};if(x.active===false)return {label:'Draft/Nonaktif',cls:'gray'};if(st&&n<st.getTime())return {label:'Akan Datang',cls:'orange'};if(en&&n>en.getTime())return {label:'Selesai',cls:'gray'};return {label:'Berlangsung',cls:'green'};}
+async function examsAdmin(){
+ if(!(await isAdmin()))return adminLogin();
+ var pair=await Promise.all([db.collection('examPublic').get(),db.collection('students').get()]);
+ var list=sortExamsBySchedule(pair[0].docs.map(function(d){return Object.assign({id:d.id},d.data());}));
+ var students=pair[1].docs.map(function(d){return Object.assign({id:d.id},d.data());});
+ var palette=['blue','green','purple','orange'];
+ var cards=list.map(function(x,i){
+  var st=toDate(x.startAt),status=examAdminStatus(x),day=st?String(st.getDate()).padStart(2,'0'):'--',mon=st?st.toLocaleDateString('id-ID',{month:'short'}).replace('.','').toUpperCase():'';
+  var allowed=x.allowedClasses||[],participants=students.filter(function(s){
+  if(s.approved!==true||s.active!==true)return false;
+  return !allowed.length||allowed.indexOf(String(s.classId||'').toUpperCase())>=0;
+ }).length;
+  var classes=allowed.join(', ')||'Semua kelas';
+  return '<article class="exam-schedule-card"><div class="schedule-date '+palette[i%4]+'"><b>'+esc(day)+'</b><small>'+esc(mon)+'</small></div><div class="schedule-main"><div class="schedule-title-row"><div><h3>'+esc(x.name||'Ujian')+'</h3><p>'+esc(x.subject||'Ujian online')+'</p></div><button class="kebab exam-kebab" aria-label="Aksi ujian" data-id="'+esc(x.id)+'" data-active="'+(x.active===false?'0':'1')+'" data-archived="'+(x.archived===true?'1':'0')+'">⋮</button></div><div class="schedule-lines"><span>'+uiIcon('calendar')+esc(st?st.toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'}):'Tanggal belum diatur')+'</span><span>'+uiIcon('clock')+esc(timeOnly(x.startAt))+' - '+esc(timeOnly(x.endAt))+'</span><span>'+uiIcon('people')+participants+' peserta</span></div><div class="schedule-foot"><span class="pill '+status.cls+'">'+status.label+'</span><span class="class-list">'+esc(classes)+'</span></div></div></article>';
+ }).join('');
+ if(!cards)cards='<div class="empty">Belum ada ujian. Tekan <b>Tambah Ujian</b> untuk membuat jadwal pertama.</div>';
+ var today=new Date(),dateVal=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
+ var addForm='<section id="addExamPanel" class="card exam-create-panel hidden-panel"><div class="section-head"><div><h2>Tambah Ujian</h2><p class="muted">Lengkapi informasi, peserta, keamanan, dan jadwal.</p></div><button class="sheet-close" id="closeExamForm">×</button></div><div class="form-section"><div class="form-section-title"><span class="form-num">1</span>Informasi Ujian</div><div class="form-grid-2"><div class="field"><label>Nama Ujian</label><input id="ename" class="input" placeholder="Contoh: Penilaian Harian 1"></div><div class="field"><label>Mata Pelajaran</label><input id="esub" class="input" placeholder="Contoh: Matematika"></div></div><div class="field"><label>Link Ujian</label><input id="eurl" class="input" placeholder="https://forms.google.com/... atau link Wayground"><div class="field-help">Gunakan link HTTPS. Link join Wayground dapat langsung digunakan tanpa menampilkan kode join terpisah.</div></div></div><div class="form-section"><div class="form-section-title"><span class="form-num">2</span>Peserta & Keamanan</div><div class="form-grid-2"><div class="field"><label>Kelas Peserta</label><input id="eclass" class="input" placeholder="7A,7B,7C atau kosong untuk semua kelas"></div><div class="field"><label>PIN Ujian</label><input id="epin" class="input" type="password" inputmode="numeric" placeholder="Masukkan PIN ujian"></div></div></div><div class="form-section"><div class="form-section-title"><span class="form-num">3</span>Jadwal</div><div class="form-grid-3"><div class="field"><label>Tanggal</label><input id="edate" class="input" type="date" value="'+dateVal+'"></div><div class="field"><label>Jam Mulai</label><input id="estime" class="input" type="time" value="08:00"></div><div class="field"><label>Jam Selesai</label><input id="eetime" class="input" type="time" value="10:00"></div></div><div id="schedulePreview" class="schedule-preview"></div></div><button class="btn green block" id="saveExam">Simpan & Jadwalkan Ujian</button><div id="examSaveMsg"></div></section>';
+ var body='<main class="wrap exam-admin-v166"><div class="page-title-row"><div><h1>Kelola Ujian</h1><p class="muted">Daftar jadwal ujian.</p></div><div class="page-actions"><button class="btn gray" id="downloadExamTemplate">Template</button><label class="btn outline file-btn">⇧ Import Excel<input id="examImportFile" type="file" accept=".xlsx,.xls,.csv" hidden></label><button class="btn outline add-exam-button" id="toggleExamForm">＋ Tambah Ujian</button></div></div>'+addForm+'<section class="exam-schedule-list">'+cards+'</section></main>';
+ top('Kelola Ujian',body,admin,'Dashboard');
+
+ function updatePreview(){var d=el('edate').value,st=el('estime').value,en=el('eetime').value;if(!d)return el('schedulePreview').innerHTML='Pilih tanggal ujian.';var dt=new Date(d+'T'+(st||'00:00'));el('schedulePreview').innerHTML='<b>'+esc(dt.toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'}))+'</b> • '+esc(st||'--:--')+' sampai '+esc(en||'--:--');}
+ ['edate','estime','eetime'].forEach(function(id){el(id).oninput=updatePreview;});updatePreview();
+ el('saveExam').onclick=saveExam;el('downloadExamTemplate').onclick=downloadExamTemplate;el('examImportFile').onchange=importExamFile;
+ el('toggleExamForm').onclick=function(){el('addExamPanel').classList.toggle('hidden-panel');if(!el('addExamPanel').classList.contains('hidden-panel'))el('addExamPanel').scrollIntoView({behavior:'smooth',block:'start'});};
+ el('closeExamForm').onclick=function(){el('addExamPanel').classList.add('hidden-panel');};
+ document.querySelectorAll('.exam-kebab').forEach(function(b){b.onclick=function(){openExamActionSheet(b.dataset.id,b.dataset.active==='1',b.dataset.archived==='1');};});
+}
+function openExamActionSheet(id,isActive,isArchived){
+ var d=document.createElement('div');d.className='mobile-sheet-backdrop';d.innerHTML='<div class="mobile-sheet exam-action-sheet"><div class="sheet-handle"></div><div class="sheet-title-row"><div><h2>Aksi Ujian</h2><p class="muted">Pilih tindakan untuk jadwal ini.</p></div><button class="sheet-close">×</button></div><button data-act="edit">✎ <span><b>Edit</b><small>Ubah detail, waktu, link, PIN</small></span></button><button data-act="duplicate">▣ <span><b>Duplikat</b><small>Buat salinan ujian</small></span></button><button data-act="toggle">'+(isActive?'Ⅱ':'▶')+' <span><b>'+(isActive?'Nonaktifkan':'Aktifkan')+'</b><small>Atur akses siswa</small></span></button><button data-act="archive">□ <span><b>'+(isArchived?'Buka Arsip':'Arsipkan')+'</b><small>'+(isArchived?'Kembalikan dari arsip':'Sembunyikan tanpa menghapus data')+'</small></span></button><button class="danger" data-act="delete">♲ <span><b>Hapus</b><small>Hapus ujian dan status pengerjaan</small></span></button></div>';
+ document.body.appendChild(d);function close(){d.remove();}d.onclick=function(e){if(e.target===d)close();};d.querySelector('.sheet-close').onclick=close;
+ d.querySelectorAll('[data-act]').forEach(function(b){b.onclick=function(){var a=b.dataset.act;close();if(a==='edit')editExam(id);else if(a==='duplicate')duplicateExam(id);else if(a==='toggle')toggleExam(id,isActive);else if(a==='archive')archiveExam(id,isArchived);else if(a==='delete')deleteExam(id);};});
+}
+async function saveExam(){
+ var name=el('ename').value.trim(),sub=el('esub').value.trim(),url=el('eurl').value.trim(),pin=el('epin').value.trim(),classes=el('eclass').value.split(',').map(function(x){return x.trim().toUpperCase();}).filter(Boolean),date=el('edate').value,stime=el('estime').value,etime=el('eetime').value;
+ if(!name||!sub||!https(url)||!pin||!date||!stime||!etime){msg('examSaveMsg','Nama ujian, mata pelajaran, link HTTPS, PIN, tanggal, jam mulai, dan jam selesai wajib diisi.');return;}
+ var start=new Date(date+'T'+stime),end=new Date(date+'T'+etime);if(end<=start){msg('examSaveMsg','Jam selesai harus setelah jam mulai.');return;}
+ try{var data={name:name,subject:sub,url:url,allowedClasses:classes,active:true,archived:false,startAt:start,endAt:end,scheduleDate:date,createdAt:firebase.firestore.FieldValue.serverTimestamp()};var ref=await db.collection('examPublic').add(data);await db.collection('examSecrets').doc(ref.id).set({pinHash:await sha256(pin)});await pakkomAlert('Ujian berhasil dijadwalkan untuk '+start.toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'})+' pukul '+stime+'.');examsAdmin();}catch(e){msg('examSaveMsg','Ujian gagal disimpan: '+(e.code||e.message));}
+}
+async function duplicateExam(id){
+ if(!(await isAdmin()))return adminLogin();
+ try{var pair=await Promise.all([db.collection('examPublic').doc(id).get(),db.collection('examSecrets').doc(id).get()]);if(!pair[0].exists)return pakkomAlert('Ujian tidak ditemukan.');var x=pair[0].data(),copy=Object.assign({},x);delete copy.createdAt;delete copy.updatedAt;copy.name=String(x.name||'Ujian')+' (Salinan)';copy.active=false;copy.archived=false;copy.createdAt=firebase.firestore.FieldValue.serverTimestamp();var ref=await db.collection('examPublic').add(copy);if(pair[1].exists){var sec=pair[1].data();await db.collection('examSecrets').doc(ref.id).set({pinHash:sec.pinHash||'',createdAt:firebase.firestore.FieldValue.serverTimestamp()});}await pakkomAlert('Ujian berhasil diduplikat dalam kondisi Nonaktif. Edit kelas/jadwal terlebih dahulu, lalu aktifkan.');examsAdmin();}catch(e){pakkomAlert('Ujian gagal diduplikat: '+(e.code||e.message));}
+}
+async function editExam(id){if(!(await isAdmin()))return adminLogin();try{var pair=await Promise.all([db.collection('examPublic').doc(id).get(),db.collection('examSecrets').doc(id).get()]);if(!pair[0].exists)return pakkomAlert('Ujian tidak ditemukan.');var x=pair[0].data(),sd=toDate(x.startAt),ed=toDate(x.endAt),date=sd?(sd.getFullYear()+'-'+String(sd.getMonth()+1).padStart(2,'0')+'-'+String(sd.getDate()).padStart(2,'0')):'',st=sd?(String(sd.getHours()).padStart(2,'0')+':'+String(sd.getMinutes()).padStart(2,'0')):'',en=ed?(String(ed.getHours()).padStart(2,'0')+':'+String(ed.getMinutes()).padStart(2,'0')):'';top('Edit Ujian','<div class="wrap"><div class="card"><h2>'+esc(x.name||'Edit Ujian')+'</h2><div class="form-grid-2"><div class="field"><label>Nama Ujian</label><input id="xname" class="input" value="'+esc(x.name||'')+'"></div><div class="field"><label>Mata Pelajaran</label><input id="xsub" class="input" value="'+esc(x.subject||'')+'"></div></div><label>Link Ujian</label><input id="xurl" class="input" value="'+esc(x.url||'')+'"><label>Kelas Peserta</label><input id="xclass" class="input" value="'+esc((x.allowedClasses||[]).join(','))+'"><div class="form-grid-3"><div class="field"><label>Tanggal</label><input id="xdate" class="input" type="date" value="'+esc(date)+'"></div><div class="field"><label>Jam Mulai</label><input id="xstart" class="input" type="time" value="'+esc(st)+'"></div><div class="field"><label>Jam Selesai</label><input id="xend" class="input" type="time" value="'+esc(en)+'"></div></div><label>PIN Baru <span class="muted">(kosongkan jika tidak diganti)</span></label><input id="xpin" class="input" type="password" inputmode="numeric" placeholder="PIN lama tidak ditampilkan"><div class="actions"><button class="btn green" id="saveEditExam">Simpan Perubahan</button><button class="btn gray" id="cancelEditExam">Batal</button></div><div id="editExamMsg"></div></div></div>',examsAdmin,'Kelola Ujian');el('saveEditExam').onclick=function(){saveExamEdit(id);};el('cancelEditExam').onclick=examsAdmin;}catch(e){pakkomAlert('Ujian tidak dapat dibuka: '+(e.code||e.message));}}
+async function saveExamEdit(id){var name=el('xname').value.trim(),sub=el('xsub').value.trim(),url=el('xurl').value.trim(),classes=el('xclass').value.split(',').map(function(v){return v.trim().toUpperCase();}).filter(Boolean),date=el('xdate').value,st=el('xstart').value,en=el('xend').value,pin=el('xpin').value.trim();if(!name||!sub||!https(url)||!date||!st||!en)return msg('editExamMsg','Lengkapi nama, pelajaran, link HTTPS, tanggal, dan waktu.');var start=new Date(date+'T'+st),end=new Date(date+'T'+en);if(end<=start)return msg('editExamMsg','Jam selesai harus setelah jam mulai.');try{await db.collection('examPublic').doc(id).update({name:name,subject:sub,url:url,allowedClasses:classes,startAt:start,endAt:end,scheduleDate:date,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});if(pin)await db.collection('examSecrets').doc(id).set({pinHash:await sha256(pin),updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});await pakkomAlert('Detail ujian berhasil diperbarui.');examsAdmin();}catch(e){msg('editExamMsg','Perubahan gagal disimpan: '+(e.code||e.message));}}
+async function toggleExam(id,a){await db.collection('examPublic').doc(id).update({active:!a,archived:false});examsAdmin();}
+async function archiveExam(id,isArchived){var ok=await pakkomConfirm((isArchived?'Keluarkan ujian ini dari arsip?':'Arsipkan ujian ini? Ujian tidak akan tampil di portal siswa, tetapi data pengerjaan tetap disimpan.'));if(!ok)return;await db.collection('examPublic').doc(id).update({archived:!isArchived,active:isArchived?true:false,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});examsAdmin();}
+async function deleteExam(id){var ok=await pakkomConfirm('Hapus ujian ini? Detail ujian, PIN, dan seluruh status pengerjaan ujian ini akan dihapus.');if(!ok)return;try{await db.collection('examPublic').doc(id).delete();await db.collection('examSecrets').doc(id).delete().catch(function(){});var q=await db.collection('examAttempts').where('examId','==',id).get();for(var i=0;i<q.docs.length;i+=400){var batch=db.batch();q.docs.slice(i,i+400).forEach(function(d){batch.delete(d.ref);});await batch.commit();}var sq=await db.collection('examScores').where('examId','==',id).get();for(var j=0;j<sq.docs.length;j+=400){var sb=db.batch();sq.docs.slice(j,j+400).forEach(function(d){sb.delete(d.ref);});await sb.commit();}examsAdmin();}catch(e){pakkomAlert('Ujian gagal dihapus: '+(e.code||e.message));}}
+
+function showNetworkState(offline){
+ var old=el('networkBanner');if(old)old.remove();if(!state.currentExam)return;
+ var b=document.createElement('div');b.id='networkBanner';b.className='network-banner '+(offline?'offline':'online');b.innerHTML=offline?'<b>Koneksi internet terputus.</b> Ujian tidak dihitung sebagai pelanggaran. Jangan menutup halaman; sistem akan menyambung kembali.':'<b>Koneksi kembali.</b> Attempt ujian yang sama tetap aktif.';document.body.appendChild(b);if(!offline)setTimeout(function(){if(b.parentNode)b.remove();},3500);
+}
+
+['click','touchstart','keydown','scroll','pointerdown'].forEach(function(evt){document.addEventListener(evt,markActivity,{passive:true});});
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden')registerExamViolation();else checkIdle();});window.addEventListener('focus',checkIdle);window.addEventListener('offline',function(){networkWasOffline=true;showNetworkState(true);});window.addEventListener('online',function(){if(networkWasOffline){networkWasOffline=false;showNetworkState(false);if(state.currentExam)getAttempt(state.currentExam.id).then(function(at){if(at&&at.status==='in_progress')saveActiveExam(state.currentExam.id);});}});setInterval(checkIdle,30000);
+
+auth.onAuthStateChanged(function(){if(!window.__pakkom_started){window.__pakkom_started=true;home();}});
+
+/* V17 MODULE — inside application scope */
+function normKey(s){return String(s==null?'':s).trim().toLowerCase().replace(/[\s_\-./]+/g,'');}
+function rowValue(row,names){var m={};Object.keys(row||{}).forEach(function(k){m[normKey(k)]=row[k];});for(var i=0;i<names.length;i++){var v=m[normKey(names[i])];if(v!==undefined&&v!==null&&String(v).trim()!=='')return v;}return '';}
+function parseExcelDate(v){if(v instanceof Date&&!isNaN(v))return v;if(typeof v==='number'&&window.XLSX&&XLSX.SSF){var x=XLSX.SSF.parse_date_code(v);if(x)return new Date(x.y,x.m-1,x.d);}var s=String(v||'').trim(),m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);if(m)return new Date(+m[3],+m[2]-1,+m[1]);var d=new Date(s);return isNaN(d)?null:d;}
+function parseExcelTime(v){if(v instanceof Date)return String(v.getHours()).padStart(2,'0')+':'+String(v.getMinutes()).padStart(2,'0');if(typeof v==='number'){var n=Math.round((v%1)*1440);return String(Math.floor(n/60)%24).padStart(2,'0')+':'+String(n%60).padStart(2,'0');}var m=String(v||'').trim().match(/(\d{1,2})[:.](\d{2})/);return m?String(+m[1]).padStart(2,'0')+':'+m[2]:'';}
+function workbookDownload(fn,sn,rows){if(!window.XLSX)return pakkomAlert('Library Excel belum dimuat.');var ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,sn);XLSX.writeFile(wb,fn);}
+function downloadExamTemplate(){workbookDownload('Template-Import-Ujian-PakKom.xlsx','Ujian',[{'Nama Ujian':'PH 1','Mata Pelajaran':'Matematika','Kelas':'7A,7B','Tanggal':'2026-08-25','Jam Mulai':'08:00','Jam Selesai':'09:30','PIN':'1234','Link':'https://example.com/ujian'}]);}
+async function importExamFile(ev){var f=ev.target.files&&ev.target.files[0];if(!f)return;try{var wb=XLSX.read(await f.arrayBuffer(),{type:'array',cellDates:true}),rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}),valid=[],bad=[];for(var i=0;i<rows.length;i++){var r=rows[i],name=String(rowValue(r,['Nama Ujian','Ujian'])).trim(),sub=String(rowValue(r,['Mata Pelajaran','Mapel'])).trim(),cls=String(rowValue(r,['Kelas','Kelas Peserta'])).split(',').map(function(x){return x.trim().toUpperCase();}).filter(Boolean),d=parseExcelDate(rowValue(r,['Tanggal'])),st=parseExcelTime(rowValue(r,['Jam Mulai','Mulai'])),en=parseExcelTime(rowValue(r,['Jam Selesai','Selesai'])),pin=String(rowValue(r,['PIN'])).trim(),url=String(rowValue(r,['Link','URL'])).trim();if(!name||!sub||!d||!st||!en||!pin||!https(url)){bad.push(i+2);continue;}var ds=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'),start=new Date(ds+'T'+st),end=new Date(ds+'T'+en);if(end<=start){bad.push(i+2);continue;}valid.push({name:name,subject:sub,allowedClasses:cls,startAt:start,endAt:end,scheduleDate:ds,url:url,pin:pin});}if(!valid.length)return pakkomAlert('Tidak ada baris valid. Periksa format template.');if(!confirm(valid.length+' ujian valid'+(bad.length?' • '+bad.length+' baris dilewati':'')+'. Import?'))return;for(var j=0;j<valid.length;j++){var x=valid[j],pin=x.pin;delete x.pin;x.active=true;x.archived=false;x.createdAt=firebase.firestore.FieldValue.serverTimestamp();var ref=await db.collection('examPublic').add(x);await db.collection('examSecrets').doc(ref.id).set({pinHash:await sha256(pin)});}await pakkomAlert(valid.length+' ujian berhasil diimport.');examsAdmin();}catch(e){pakkomAlert('Import ujian gagal: '+(e.code||e.message));}finally{ev.target.value='';}}
+function scoreDocId(e,s){return String(e)+'__'+String(s);}
+async function scoresAdmin(){if(!(await isAdmin()))return adminLogin();try{var p=await Promise.all([db.collection('examPublic').get(),db.collection('students').get(),db.collection('examScores').get()]),exams=sortExamsBySchedule(p[0].docs.map(function(d){return Object.assign({id:d.id},d.data());})),students=p[1].docs.map(function(d){return Object.assign({id:d.id},d.data());}),scores=p[2].docs.map(function(d){return Object.assign({id:d.id},d.data());}),opts='<option value="">Pilih ujian...</option>'+exams.map(function(x){return '<option value="'+esc(x.id)+'">'+esc(x.name||'Ujian')+' — '+esc(x.subject||'')+'</option>';}).join('');top('Kelola Nilai','<main class="wrap scores-admin"><div class="page-title-row"><div><h1>Kelola Nilai</h1><p class="muted">Input manual, upload Excel, lalu publikasikan ke siswa.</p></div><button class="btn gray" id="scoreTemplate">Template Nilai</button></div><section class="card"><div class="form-grid-2"><div class="field"><label>Ujian</label><select id="scoreExam" class="input">'+opts+'</select></div><div class="field"><label>Kelas</label><select id="scoreClass" class="input"><option value="">Semua kelas target</option></select></div></div><div class="score-toolbar"><label class="btn outline file-btn">⇧ Upload Nilai<input id="scoreFile" type="file" accept=".xlsx,.xls,.csv" hidden></label><button class="btn green" id="publishScores">Publikasikan</button><button class="btn gray" id="unpublishScores">Jadikan Draft</button><button class="btn outline" id="exportScores">Export Rekap</button></div></section><section class="card"><div id="scoreTableArea" class="empty">Pilih ujian untuk menampilkan siswa.</div></section></main>',admin,'Dashboard');window._scoreCtx={exams:exams,students:students,scores:scores};el('scoreTemplate').onclick=downloadScoreTemplate;el('scoreExam').onchange=renderScoreEditor;el('scoreClass').onchange=renderScoreEditor;el('scoreFile').onchange=importScoreFile;el('publishScores').onclick=function(){bulkPublishScores(true);};el('unpublishScores').onclick=function(){bulkPublishScores(false);};el('exportScores').onclick=exportScores;}catch(e){pakkomAlert('Kelola Nilai gagal: '+(e.code||e.message));}}
+function targetStudentsForScore(){var c=window._scoreCtx||{},eid=el('scoreExam').value,exam=(c.exams||[]).find(function(x){return x.id===eid;});if(!exam)return [];var allowed=exam.allowedClasses||[],cls=el('scoreClass').value;return (c.students||[]).filter(function(s){var sc=String(s.classId||'').toUpperCase();return s.active===true&&s.approved===true&&(!allowed.length||allowed.indexOf(sc)>=0)&&(!cls||sc===cls);}).sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''));});}
+function renderScoreEditor(){var c=window._scoreCtx||{},eid=el('scoreExam').value,exam=(c.exams||[]).find(function(x){return x.id===eid;});if(!exam){el('scoreTableArea').innerHTML='<div class="empty">Pilih ujian.</div>';return;}var allowed=exam.allowedClasses||[],classes=[...new Set((c.students||[]).map(function(s){return String(s.classId||'').toUpperCase();}).filter(function(x){return x&&(!allowed.length||allowed.indexOf(x)>=0);} ))].sort(),cur=el('scoreClass').value;el('scoreClass').innerHTML='<option value="">Semua kelas target</option>'+classes.map(function(x){return '<option '+(x===cur?'selected':'')+'>'+esc(x)+'</option>';}).join('');var list=targetStudentsForScore(),sm={};(c.scores||[]).filter(function(x){return x.examId===eid;}).forEach(function(x){sm[x.studentId]=x;});var rows=list.map(function(s){var x=sm[s.id]||{};return '<tr><td>'+esc(s.nis||'')+'</td><td><b>'+esc(s.name||'')+'</b></td><td>'+esc(s.classId||'')+'</td><td><input class="input score-input" type="number" min="0" step="0.01" data-student="'+esc(s.id)+'" value="'+esc(x.score==null?'':x.score)+'"></td><td><input class="input note-input" data-student="'+esc(s.id)+'" value="'+esc(x.note||'')+'" placeholder="Keterangan"></td><td><span class="pill '+(x.published?'green':'gray')+'">'+(x.published?'Publik':'Draft')+'</span></td><td><button class="btn small green save-score" data-student="'+esc(s.id)+'">Simpan</button></td></tr>';}).join('');el('scoreTableArea').innerHTML='<div class="section-head"><div><h2>'+esc(exam.name||'Ujian')+'</h2><p class="muted">'+esc(exam.subject||'')+' • '+list.length+' siswa</p></div></div><div class="table-wrap"><table><thead><tr><th>NIS</th><th>Nama</th><th>Kelas</th><th>Nilai</th><th>Keterangan</th><th>Status</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table></div>';document.querySelectorAll('.save-score').forEach(function(b){b.onclick=function(){saveSingleScore(b.dataset.student);};});}
+async function saveSingleScore(sid){var c=window._scoreCtx,eid=el('scoreExam').value,exam=c.exams.find(function(x){return x.id===eid;}),s=c.students.find(function(x){return x.id===sid;}),inp=document.querySelector('.score-input[data-student="'+sid+'"]'),note=document.querySelector('.note-input[data-student="'+sid+'"]'),raw=inp.value.trim();if(raw==='')return pakkomAlert('Masukkan nilai.');var score=Number(raw);if(!isFinite(score)||score<0)return pakkomAlert('Nilai tidak valid.');var old=(c.scores||[]).find(function(x){return x.examId===eid&&x.studentId===sid;});try{await db.collection('examScores').doc(scoreDocId(eid,sid)).set({examId:eid,studentId:sid,nis:String(s.nis||''),studentName:String(s.name||''),classId:String(s.classId||''),examName:String(exam.name||''),subject:String(exam.subject||''),score:score,note:note.value.trim(),published:old?old.published===true:false,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});await pakkomAlert('Nilai berhasil disimpan.');scoresAdmin();}catch(e){pakkomAlert('Nilai gagal disimpan: '+(e.code||e.message));}}
+function downloadScoreTemplate(){var rows=[],eid=el('scoreExam')&&el('scoreExam').value;if(eid)targetStudentsForScore().forEach(function(s){rows.push({'NIS':s.nis||'','Nama':s.name||'','Kelas':s.classId||'','Nilai':'','Keterangan':''});});if(!rows.length)rows=[{'NIS':'12345','Nama':'Contoh Siswa','Kelas':'7A','Nilai':85,'Keterangan':'Tuntas'}];workbookDownload('Template-Nilai-PakKom.xlsx','Nilai',rows);}
+async function importScoreFile(ev){var eid=el('scoreExam').value;if(!eid){ev.target.value='';return pakkomAlert('Pilih ujian terlebih dahulu.');}var f=ev.target.files&&ev.target.files[0];if(!f)return;try{var wb=XLSX.read(await f.arrayBuffer(),{type:'array'}),rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}),c=window._scoreCtx,exam=c.exams.find(function(x){return x.id===eid;}),targets=targetStudentsForScore(),by={};targets.forEach(function(s){by[String(s.nis||'').trim()]=s;});var valid=[],bad=[];rows.forEach(function(r,i){var nis=String(rowValue(r,['NIS','Nomor Induk'])).trim(),raw=rowValue(r,['Nilai','Score']),n=Number(raw),s=by[nis];if(!s||raw===''||!isFinite(n)||n<0){bad.push(i+2);return;}valid.push({s:s,score:n,note:String(rowValue(r,['Keterangan','Catatan'])).trim()});});if(!valid.length)return pakkomAlert('Tidak ada NIS/nilai yang cocok.');if(!confirm(valid.length+' nilai cocok'+(bad.length?' • '+bad.length+' baris dilewati':'')+'. Import sebagai Draft?'))return;for(var i=0;i<valid.length;i+=400){var b=db.batch();valid.slice(i,i+400).forEach(function(v){b.set(db.collection('examScores').doc(scoreDocId(eid,v.s.id)),{examId:eid,studentId:v.s.id,nis:String(v.s.nis||''),studentName:String(v.s.name||''),classId:String(v.s.classId||''),examName:String(exam.name||''),subject:String(exam.subject||''),score:v.score,note:v.note,published:false,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});});await b.commit();}await pakkomAlert(valid.length+' nilai diimport sebagai Draft.');scoresAdmin();}catch(e){pakkomAlert('Import nilai gagal: '+(e.code||e.message));}finally{ev.target.value='';}}
+async function bulkPublishScores(flag){var eid=el('scoreExam').value;if(!eid)return pakkomAlert('Pilih ujian.');var q=await db.collection('examScores').where('examId','==',eid).get();if(q.empty)return pakkomAlert('Belum ada nilai.');if(!confirm((flag?'Publikasikan ':'Jadikan Draft ')+q.size+' nilai?'))return;for(var i=0;i<q.docs.length;i+=400){var b=db.batch();q.docs.slice(i,i+400).forEach(function(d){b.update(d.ref,{published:flag,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});});await b.commit();}scoresAdmin();}
+function exportScores(){var c=window._scoreCtx||{},eid=el('scoreExam').value;if(!eid)return pakkomAlert('Pilih ujian.');var exam=c.exams.find(function(x){return x.id===eid;}),rows=(c.scores||[]).filter(function(x){return x.examId===eid;}).map(function(x){return {'NIS':x.nis,'Nama':x.studentName,'Kelas':x.classId,'Nilai':x.score,'Keterangan':x.note||'','Status':x.published?'Dipublikasikan':'Draft'};});if(!rows.length)return pakkomAlert('Belum ada nilai.');workbookDownload('Rekap-Nilai-'+String(exam.name||'Ujian').replace(/[^\w\-]+/g,'-')+'.xlsx','Nilai',rows);}
+async function studentScores(){if(!state.student)return home();try{var q=await db.collection('examScores').where('studentId','==',state.student.id).get(),list=q.docs.map(function(d){return Object.assign({id:d.id},d.data());}).filter(function(x){return x.published===true;});var cards=list.map(function(x){return '<article class="student-score-card"><div><span class="eyebrow">'+esc(x.subject||'UJIAN')+'</span><h3>'+esc(x.examName||'Ujian')+'</h3><p>'+esc(x.note||'Nilai telah dipublikasikan')+'</p></div><div class="score-number">'+esc(x.score)+'</div></article>';}).join('')||'<div class="empty">Belum ada nilai yang dipublikasikan.</div>';top('Nilai Saya','<main class="wrap student-scores"><div class="page-title-row"><div><h1>Nilai Saya</h1><p class="muted">'+esc(state.student.name)+' • Kelas '+esc(state.classId)+'</p></div></div><section class="score-card-grid">'+cards+'</section></main>',studentDashboard,'Dashboard');}catch(e){pakkomAlert('Nilai gagal dimuat: '+(e.code||e.message));}}
+
+
+/* ======================================================================
+   V18 — Quiz Builder / Bank Soal + External Media Upload
+   ====================================================================== */
+var QUESTION_MEDIA_ENDPOINT_KEY='pakkomQuestionMediaEndpoint';
+
+function getQuestionMediaEndpoint(){
+ return String(localStorage.getItem(QUESTION_MEDIA_ENDPOINT_KEY)||'').trim();
+}
+function saveQuestionMediaEndpoint(){
+ var v=el('questionMediaEndpoint').value.trim();
+ if(v&&!https(v))return pakkomAlert('Endpoint Apps Script harus menggunakan HTTPS.');
+ if(v)localStorage.setItem(QUESTION_MEDIA_ENDPOINT_KEY,v);else localStorage.removeItem(QUESTION_MEDIA_ENDPOINT_KEY);
+ pakkomAlert('Pengaturan media tersimpan di perangkat admin ini.');
+}
+async function compressQuestionImage(file){
+ return new Promise(function(resolve,reject){
+  var img=new Image(),url=URL.createObjectURL(file);
+  img.onload=function(){
+   try{
+    var max=1200,scale=Math.min(1,max/Math.max(img.width,img.height)),w=Math.max(1,Math.round(img.width*scale)),h=Math.max(1,Math.round(img.height*scale));
+    var c=document.createElement('canvas');c.width=w;c.height=h;var ctx=c.getContext('2d');ctx.drawImage(img,0,0,w,h);
+    c.toBlob(function(blob){URL.revokeObjectURL(url);if(!blob)return reject(new Error('Kompresi gambar gagal.'));resolve(blob);},'image/webp',0.78);
+   }catch(e){URL.revokeObjectURL(url);reject(e);}
+  };
+  img.onerror=function(){URL.revokeObjectURL(url);reject(new Error('File gambar tidak dapat dibaca.'));};
+  img.src=url;
+ });
+}
+async function uploadQuestionImage(){
+ var f=el('questionImageFile').files&&el('questionImageFile').files[0];if(!f)return pakkomAlert('Pilih gambar terlebih dahulu.');
+ var endpoint=getQuestionMediaEndpoint();if(!endpoint)return pakkomAlert('Masukkan URL Web App Google Apps Script pada Pengaturan Media terlebih dahulu.');
+ try{
+  el('questionUploadMsg').innerHTML='<div class="notice">Mengompresi dan mengupload gambar...</div>';
+  var blob=await compressQuestionImage(f),reader=new FileReader();
+  var base64=await new Promise(function(resolve,reject){reader.onload=function(){resolve(String(reader.result).split(',')[1]);};reader.onerror=reject;reader.readAsDataURL(blob);});
+  var payload={action:'uploadQuestionImage',filename:'question-'+Date.now()+'.webp',mimeType:'image/webp',base64:base64};
+  var res=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)});
+  var data=await res.json();if(!data.ok||!data.url)throw new Error(data.error||'URL gambar tidak diterima.');
+  el('questionImageUrl').value=data.url;el('questionImagePreview').innerHTML='<img src="'+esc(data.url)+'" alt="Preview gambar soal">';
+  el('questionUploadMsg').innerHTML='<div class="notice success">Gambar berhasil diupload. Firestore hanya menyimpan URL.</div>';
+ }catch(e){el('questionUploadMsg').innerHTML='';pakkomAlert('Upload gambar gagal: '+(e.message||e));}
+}
+function previewQuestionImage(){
+ var u=el('questionImageUrl').value.trim();el('questionImagePreview').innerHTML=u&&https(u)?'<img src="'+esc(u)+'" alt="Preview gambar soal">':'';
+}
+function questionTypeFields(type,data){
+ data=data||{};var opts=data.options||['','','',''];
+ if(type==='multiple_choice')return '<div class="field"><label>Pilihan Jawaban</label><div class="option-editor">'+opts.map(function(x,i){return '<label class="option-edit-row"><input type="radio" name="correctOption" value="'+i+'" '+(Number(data.correctIndex)===i?'checked':'')+'><span>'+String.fromCharCode(65+i)+'</span><input class="input q-option" value="'+esc(x)+'" placeholder="Pilihan '+String.fromCharCode(65+i)+'"></label>';}).join('')+'</div></div>';
+ if(type==='true_false')return '<div class="field"><label>Kunci Jawaban</label><select id="qTrueFalse" class="input"><option value="true" '+(data.answer==='true'?'selected':'')+'>Benar</option><option value="false" '+(data.answer==='false'?'selected':'')+'>Salah</option></select></div>';
+ if(type==='short_answer')return '<div class="field"><label>Kunci Jawaban Singkat</label><input id="qShortAnswer" class="input" value="'+esc(data.answer||'')+'" placeholder="Jawaban yang dianggap benar"></div>';
+ return '<div class="notice">Soal uraian akan diperiksa manual oleh admin/guru.</div>';
+}
+async function questionBankAdmin(editId){
+ if(!(await isAdmin()))return adminLogin();
+ var q=await db.collection('questionBank').get(),list=q.docs.map(function(d){return Object.assign({id:d.id},d.data());}),edit=editId?list.find(function(x){return x.id===editId;}):null;
+ var cards=list.sort(function(a,b){return String(a.subject||'').localeCompare(String(b.subject||''));}).map(function(x){
+  return '<article class="question-card"><div class="question-card-main">'+(x.imageUrl?'<img src="'+esc(x.imageUrl)+'" alt="">':'')+'<div><span class="eyebrow">'+esc(x.subject||'Tanpa Mapel')+' • '+esc(x.classLevel||'')+'</span><h3>'+esc(x.question||'Soal')+'</h3><p>'+esc(questionTypeLabel(x.type))+' • Bobot '+esc(x.points||1)+'</p></div></div><div class="question-card-actions"><button class="btn small outline qedit" data-id="'+esc(x.id)+'">Edit</button><button class="btn small red qdelete" data-id="'+esc(x.id)+'">Hapus</button></div></article>';
+ }).join('')||'<div class="empty">Bank soal masih kosong.</div>';
+ var body='<main class="wrap question-bank"><div class="page-title-row"><div><h1>Bank Soal</h1><p class="muted">Soal disimpan di Firestore. Gambar disimpan di Google Drive melalui Apps Script.</p></div><button class="btn outline" id="toggleMediaSettings">⚙ Media</button></div>'+
+ '<section id="mediaSettings" class="card media-settings hidden-panel"><div class="section-head"><div><h2>Pengaturan Media Soal</h2><p class="muted">Masukkan URL Web App Apps Script penyimpanan gambar.</p></div></div><div class="field"><label>Apps Script Web App URL</label><input id="questionMediaEndpoint" class="input" value="'+esc(getQuestionMediaEndpoint())+'" placeholder="https://script.google.com/macros/s/.../exec"></div><button class="btn green" id="saveMediaEndpoint">Simpan Pengaturan</button></section>'+
+ '<div class="question-layout"><section class="card question-editor"><div class="section-head"><div><h2>'+(edit?'Edit Soal':'Buat Soal')+'</h2><p class="muted">Buat soal langsung di PakKom Exambro.</p></div></div><input type="hidden" id="questionEditId" value="'+esc(edit?edit.id:'')+'"><div class="form-grid-3"><div class="field"><label>Mata Pelajaran</label><input id="qSubject" class="input" value="'+esc(edit?edit.subject:'')+'" placeholder="Matematika"></div><div class="field"><label>Kelas</label><input id="qClass" class="input" value="'+esc(edit?edit.classLevel:'')+'" placeholder="7"></div><div class="field"><label>Bobot</label><input id="qPoints" class="input" type="number" min="0.1" step="0.1" value="'+esc(edit?edit.points||1:1)+'"></div></div><div class="field"><label>Jenis Soal</label><select id="qType" class="input"><option value="multiple_choice">Pilihan Ganda</option><option value="true_false">Benar / Salah</option><option value="short_answer">Isian Singkat</option><option value="essay">Uraian</option></select></div><div class="field"><label>Pertanyaan</label><textarea id="qText" class="input question-text" placeholder="Tuliskan soal...">'+esc(edit?edit.question:'')+'</textarea></div>'+
+ '<div class="question-media-box"><div class="field"><label>Gambar Soal (opsional)</label><div class="media-actions"><input id="questionImageFile" class="input" type="file" accept="image/*"><button class="btn outline" id="uploadQuestionImageBtn">Upload ke Drive</button></div><div class="or-line">atau tempel URL gambar</div><input id="questionImageUrl" class="input" value="'+esc(edit?edit.imageUrl||'':'')+'" placeholder="https://..."></div><div id="questionImagePreview" class="question-image-preview">'+(edit&&edit.imageUrl?'<img src="'+esc(edit.imageUrl)+'" alt="Preview">':'')+'</div><div id="questionUploadMsg"></div></div>'+
+ '<div id="questionAnswerFields"></div><div class="form-grid-2"><div class="field"><label>Topik/Bab</label><input id="qTopic" class="input" value="'+esc(edit?edit.topic||'':'')+'" placeholder="Bilangan"></div><div class="field"><label>Tingkat Kesulitan</label><select id="qDifficulty" class="input"><option>Mudah</option><option>Sedang</option><option>Sulit</option></select></div></div><button class="btn green block" id="saveQuestionBtn">'+(edit?'Simpan Perubahan':'Simpan ke Bank Soal')+'</button></section>'+
+ '<section><div class="question-list-head"><div><h2>Daftar Soal</h2><p class="muted">'+list.length+' soal tersimpan</p></div></div><div class="question-list">'+cards+'</div></section></div></main>';
+ top('Bank Soal',body,admin,'Dashboard');
+ el('qType').value=edit?edit.type||'multiple_choice':'multiple_choice';el('qDifficulty').value=edit?edit.difficulty||'Sedang':'Sedang';
+ function renderFields(){el('questionAnswerFields').innerHTML=questionTypeFields(el('qType').value,edit&&el('questionEditId').value?edit:{});}
+ renderFields();el('qType').onchange=function(){edit=null;renderFields();};
+ el('questionImageUrl').oninput=previewQuestionImage;el('uploadQuestionImageBtn').onclick=uploadQuestionImage;
+ el('toggleMediaSettings').onclick=function(){el('mediaSettings').classList.toggle('hidden-panel');};el('saveMediaEndpoint').onclick=saveQuestionMediaEndpoint;
+ el('saveQuestionBtn').onclick=saveQuestion;
+ document.querySelectorAll('.qedit').forEach(function(b){b.onclick=function(){questionBankAdmin(b.dataset.id);};});
+ document.querySelectorAll('.qdelete').forEach(function(b){b.onclick=function(){deleteQuestion(b.dataset.id);};});
+}
+function questionTypeLabel(t){return {multiple_choice:'Pilihan Ganda',true_false:'Benar / Salah',short_answer:'Isian Singkat',essay:'Uraian'}[t]||t;}
+async function saveQuestion(){
+ var id=el('questionEditId').value,type=el('qType').value,text=el('qText').value.trim(),subject=el('qSubject').value.trim();
+ if(!text||!subject)return pakkomAlert('Mata pelajaran dan pertanyaan wajib diisi.');
+ var data={subject:subject,classLevel:el('qClass').value.trim(),points:Number(el('qPoints').value)||1,type:type,question:text,imageUrl:el('questionImageUrl').value.trim(),topic:el('qTopic').value.trim(),difficulty:el('qDifficulty').value,updatedAt:firebase.firestore.FieldValue.serverTimestamp()};
+ if(data.imageUrl&&!https(data.imageUrl))return pakkomAlert('URL gambar harus HTTPS.');
+ if(type==='multiple_choice'){data.options=[].slice.call(document.querySelectorAll('.q-option')).map(function(x){return x.value.trim();});var c=document.querySelector('input[name="correctOption"]:checked');if(data.options.some(function(x){return !x;})||!c)return pakkomAlert('Lengkapi semua pilihan dan pilih kunci jawaban.');data.correctIndex=Number(c.value);}
+ else if(type==='true_false')data.answer=el('qTrueFalse').value;
+ else if(type==='short_answer'){data.answer=el('qShortAnswer').value.trim();if(!data.answer)return pakkomAlert('Masukkan kunci jawaban singkat.');}
+ else data.manualGrading=true;
+ try{if(id)await db.collection('questionBank').doc(id).set(data,{merge:true});else{data.createdAt=firebase.firestore.FieldValue.serverTimestamp();await db.collection('questionBank').add(data);}questionBankAdmin();}catch(e){pakkomAlert('Soal gagal disimpan: '+(e.code||e.message));}
+}
+async function deleteQuestion(id){if(!confirm('Hapus soal ini dari Bank Soal?'))return;try{await db.collection('questionBank').doc(id).delete();questionBankAdmin();}catch(e){pakkomAlert('Soal gagal dihapus: '+(e.code||e.message));}}
+
+
+/* ======================================================================
+   V19 — PakKom Exam Builder
+   Editor ala Google Forms + Bank Soal + Internal Exam
+   ====================================================================== */
+var BUILDER_DRAFT_KEY='pakkom_v19_builder_draft';
+
+function newBuilderQuestion(type){
+ return {id:'q_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),type:type||'multiple_choice',question:'',imageUrl:'',points:1,options:['','','',''],correctIndex:0,answer:'',required:true};
+}
+function builderDraft(){
+ try{
+  var x=JSON.parse(sessionStorage.getItem(BUILDER_DRAFT_KEY)||'null');
+  if(x&&Array.isArray(x.questions))return x;
+ }catch(e){}
+ return {title:'',subject:'',classes:[],startAt:'',endAt:'',pin:'',shuffleQuestions:false,shuffleOptions:false,allowBack:true,showScore:false,questions:[newBuilderQuestion()]};
+}
+function saveBuilderDraft(d){sessionStorage.setItem(BUILDER_DRAFT_KEY,JSON.stringify(d));}
+function clearBuilderDraft(){sessionStorage.removeItem(BUILDER_DRAFT_KEY);}
+function builderReadForm(){
+ var d=window.__builderData||builderDraft();
+ d.title=el('ibTitle')?el('ibTitle').value.trim():d.title;
+ d.subject=el('ibSubject')?el('ibSubject').value.trim():d.subject;
+ d.startAt=el('ibStart')?el('ibStart').value:d.startAt;
+ d.endAt=el('ibEnd')?el('ibEnd').value:d.endAt;
+ d.pin=el('ibPin')?el('ibPin').value.trim():d.pin;
+ d.shuffleQuestions=!!(el('ibShuffleQ')&&el('ibShuffleQ').checked);
+ d.shuffleOptions=!!(el('ibShuffleO')&&el('ibShuffleO').checked);
+ d.allowBack=!!(el('ibAllowBack')&&el('ibAllowBack').checked);
+ d.showScore=!!(el('ibShowScore')&&el('ibShowScore').checked);
+ d.classes=[].slice.call(document.querySelectorAll('.ib-class:checked')).map(function(x){return x.value;});
+ document.querySelectorAll('.builder-question').forEach(function(card){
+  var q=d.questions.find(function(x){return x.id===card.dataset.qid;});if(!q)return;
+  q.question=card.querySelector('.bq-text').value.trim();
+  q.imageUrl=card.querySelector('.bq-image').value.trim();
+  q.points=Number(card.querySelector('.bq-points').value)||1;
+  q.required=card.querySelector('.bq-required').checked;
+  if(q.type==='multiple_choice'||q.type==='multi_select'){
+   q.options=[].slice.call(card.querySelectorAll('.bq-option')).map(function(x){return x.value.trim();});
+   var checked=[].slice.call(card.querySelectorAll('.bq-correct:checked')).map(function(x){return Number(x.value);});
+   if(q.type==='multiple_choice')q.correctIndex=checked.length?checked[0]:0;else q.correctIndexes=checked;
+  }else if(q.type==='true_false'){var a=card.querySelector('.bq-tf');q.answer=a?a.value:'true';}
+  else if(q.type==='short_answer'){var sa=card.querySelector('.bq-answer');q.answer=sa?sa.value.trim():'';}
+ });
+ saveBuilderDraft(d);return d;
+}
+function builderAnswerEditor(q){
+ if(q.type==='multiple_choice'||q.type==='multi_select'){
+  var inputType=q.type==='multiple_choice'?'radio':'checkbox',name='correct_'+q.id;
+  return '<div class="builder-options">'+(q.options||['','','','']).map(function(o,i){
+   var checked=q.type==='multiple_choice'?Number(q.correctIndex)===i:(q.correctIndexes||[]).indexOf(i)>=0;
+   return '<div class="builder-option"><input class="bq-correct" type="'+inputType+'" name="'+name+'" value="'+i+'" '+(checked?'checked':'')+'><span>'+String.fromCharCode(65+i)+'</span><input class="input bq-option" value="'+esc(o)+'" placeholder="Pilihan '+String.fromCharCode(65+i)+'"></div>';
+  }).join('')+'<button class="link-btn bq-add-option" type="button">+ Tambah pilihan</button></div>';
+ }
+ if(q.type==='true_false')return '<div class="field"><label>Kunci jawaban</label><select class="input bq-tf"><option value="true" '+(q.answer==='true'?'selected':'')+'>Benar</option><option value="false" '+(q.answer==='false'?'selected':'')+'>Salah</option></select></div>';
+ if(q.type==='short_answer')return '<div class="field"><label>Kunci jawaban</label><input class="input bq-answer" value="'+esc(q.answer||'')+'" placeholder="Jawaban singkat"></div>';
+ return '<div class="notice">Uraian akan masuk ke daftar koreksi manual.</div>';
+}
+function builderQuestionCard(q,i){
+ return '<article class="card builder-question" data-qid="'+esc(q.id)+'"><div class="builder-q-head"><span class="q-number">Soal '+(i+1)+'</span><select class="input bq-type"><option value="multiple_choice">Pilihan Ganda</option><option value="multi_select">Multi Jawaban</option><option value="true_false">Benar / Salah</option><option value="short_answer">Isian Singkat</option><option value="essay">Uraian</option></select></div>'+
+ '<textarea class="input bq-text" placeholder="Tuliskan pertanyaan...">'+esc(q.question||'')+'</textarea>'+
+ '<div class="builder-media-row"><input class="input bq-image" value="'+esc(q.imageUrl||'')+'" placeholder="URL gambar soal (opsional)"><button class="btn outline small bq-media" type="button">🖼 Media</button></div>'+
+ (q.imageUrl?'<div class="builder-image"><img src="'+esc(q.imageUrl)+'" alt=""></div>':'')+
+ '<div class="bq-answer-area">'+builderAnswerEditor(q)+'</div>'+
+ '<div class="builder-q-footer"><label>Bobot <input class="input bq-points" type="number" min="0.1" step="0.1" value="'+esc(q.points||1)+'"></label><label class="checkline"><input class="bq-required" type="checkbox" '+(q.required!==false?'checked':'')+'> Wajib</label><div class="grow"></div><button class="icon-btn bq-duplicate" title="Duplikat">⧉</button><button class="icon-btn bq-up" title="Naik">↑</button><button class="icon-btn bq-down" title="Turun">↓</button><button class="icon-btn danger bq-delete" title="Hapus">🗑</button></div></article>';
+}
+async function internalExamBuilder(){
+ if(!(await isAdmin()))return adminLogin();
+ var classes=(await db.collection('classes').get()).docs.map(function(d){return Object.assign({id:d.id},d.data());}).filter(function(x){return x.active!==false;});
+ var d=builderDraft();window.__builderData=d;
+ var body='<main class="wrap exam-builder"><div class="page-title-row"><div><h1>Buat Ujian Internal</h1><p class="muted">Susun soal seperti formulir, lalu terbitkan langsung ke PakKom Exambro.</p></div><button class="btn outline" id="ibPreview">Preview</button></div>'+
+ '<section class="card builder-header"><div class="form-grid-2"><div class="field"><label>Nama Ujian</label><input id="ibTitle" class="input" value="'+esc(d.title)+'" placeholder="Penilaian Harian Matematika"></div><div class="field"><label>Mata Pelajaran</label><input id="ibSubject" class="input" value="'+esc(d.subject)+'" placeholder="Matematika"></div></div><div class="field"><label>Kelas Peserta</label><div class="class-chip-grid">'+classes.map(function(c){return '<label class="class-chip"><input class="ib-class" type="checkbox" value="'+esc(c.id)+'" '+(d.classes.indexOf(c.id)>=0?'checked':'')+'><span>'+esc(c.name||c.id)+'</span></label>';}).join('')+'</div></div><div class="form-grid-3"><div class="field"><label>Mulai</label><input id="ibStart" class="input" type="datetime-local" value="'+esc(d.startAt)+'"></div><div class="field"><label>Selesai</label><input id="ibEnd" class="input" type="datetime-local" value="'+esc(d.endAt)+'"></div><div class="field"><label>PIN</label><input id="ibPin" class="input" value="'+esc(d.pin)+'" placeholder="Opsional"></div></div><div class="builder-settings"><label><input id="ibShuffleQ" type="checkbox" '+(d.shuffleQuestions?'checked':'')+'> Acak soal</label><label><input id="ibShuffleO" type="checkbox" '+(d.shuffleOptions?'checked':'')+'> Acak pilihan</label><label><input id="ibAllowBack" type="checkbox" '+(d.allowBack?'checked':'')+'> Boleh kembali</label><label><input id="ibShowScore" type="checkbox" '+(d.showScore?'checked':'')+'> Tampilkan nilai setelah selesai</label></div></section>'+
+ '<div id="builderQuestions">'+d.questions.map(builderQuestionCard).join('')+'</div>'+
+ '<div class="builder-addbar"><button class="btn outline" id="ibAddQuestion">+ Buat Soal Baru</button><button class="btn outline" id="ibFromBank">📚 Ambil dari Bank Soal</button><button class="btn green" id="ibPublish">Terbitkan Ujian</button></div></main>';
+ top('Buat Ujian Internal',body,admin,'Dashboard');
+ bindBuilder();
+}
+function bindBuilder(){
+ var d=window.__builderData;
+ document.querySelectorAll('.builder-question').forEach(function(card){
+  var id=card.dataset.qid,q=d.questions.find(function(x){return x.id===id;});
+  card.querySelector('.bq-type').value=q.type;
+  card.querySelector('.bq-type').onchange=function(){builderReadForm();q.type=this.value;if(q.type==='multiple_choice'||q.type==='multi_select')q.options=q.options&&q.options.length?q.options:['','','',''];saveBuilderDraft(d);internalExamBuilder();};
+  var add=card.querySelector('.bq-add-option');if(add)add.onclick=function(){builderReadForm();q.options.push('');saveBuilderDraft(d);internalExamBuilder();};
+  card.querySelector('.bq-delete').onclick=function(){builderReadForm();if(d.questions.length<=1)return pakkomAlert('Ujian minimal memiliki satu soal.');d.questions=d.questions.filter(function(x){return x.id!==id;});saveBuilderDraft(d);internalExamBuilder();};
+  card.querySelector('.bq-duplicate').onclick=function(){builderReadForm();var copy=JSON.parse(JSON.stringify(q));copy.id='q_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);var at=d.questions.findIndex(function(x){return x.id===id;});d.questions.splice(at+1,0,copy);saveBuilderDraft(d);internalExamBuilder();};
+  card.querySelector('.bq-up').onclick=function(){builderReadForm();var at=d.questions.findIndex(function(x){return x.id===id;});if(at>0){var t=d.questions[at-1];d.questions[at-1]=d.questions[at];d.questions[at]=t;}saveBuilderDraft(d);internalExamBuilder();};
+  card.querySelector('.bq-down').onclick=function(){builderReadForm();var at=d.questions.findIndex(function(x){return x.id===id;});if(at<d.questions.length-1){var t=d.questions[at+1];d.questions[at+1]=d.questions[at];d.questions[at]=t;}saveBuilderDraft(d);internalExamBuilder();};
+  card.querySelector('.bq-media').onclick=function(){builderReadForm();questionBankAdmin();};
+ });
+ el('ibAddQuestion').onclick=function(){builderReadForm();d.questions.push(newBuilderQuestion());saveBuilderDraft(d);internalExamBuilder();};
+ el('ibFromBank').onclick=builderPickFromBank;
+ el('ibPreview').onclick=function(){builderReadForm();builderPreview(d);};
+ el('ibPublish').onclick=publishInternalExam;
+ document.querySelectorAll('#ibTitle,#ibSubject,#ibStart,#ibEnd,#ibPin,.ib-class,#ibShuffleQ,#ibShuffleO,#ibAllowBack,#ibShowScore').forEach(function(x){x.onchange=function(){builderReadForm();};});
+}
+async function builderPickFromBank(){
+ builderReadForm();var d=window.__builderData,q=(await db.collection('questionBank').get()).docs.map(function(x){return Object.assign({bankId:x.id},x.data());});
+ var items=q.map(function(x,i){return '<label class="bank-pick"><input type="checkbox" value="'+i+'"><span><b>'+esc(x.question||'Soal')+'</b><small>'+esc(x.subject||'')+' • '+esc(questionTypeLabel(x.type))+'</small></span></label>';}).join('')||'<div class="empty">Bank soal masih kosong.</div>';
+ app.innerHTML='<main class="wrap"><div class="page-title-row"><div><h1>Ambil dari Bank Soal</h1><p class="muted">Pilih satu atau beberapa soal.</p></div><button class="btn outline" id="bankBack">Kembali</button></div><section class="card"><div class="bank-pick-list">'+items+'</div><button class="btn green block" id="bankAdd">Tambahkan ke Ujian</button></section></main>';
+ el('bankBack').onclick=internalExamBuilder;el('bankAdd').onclick=function(){[].slice.call(document.querySelectorAll('.bank-pick input:checked')).forEach(function(c){var b=q[Number(c.value)],n=newBuilderQuestion(b.type);Object.assign(n,{question:b.question||'',imageUrl:b.imageUrl||'',points:Number(b.points)||1,options:(b.options||['','','','']).slice(),correctIndex:Number(b.correctIndex)||0,correctIndexes:(b.correctIndexes||[]).slice(),answer:b.answer||'',sourceBankId:b.bankId});d.questions.push(n);});saveBuilderDraft(d);internalExamBuilder();};
+}
+function builderPreview(d){
+ var html=d.questions.map(function(q,i){return '<article class="card preview-q"><b>Soal '+(i+1)+' • '+esc(q.points||1)+' poin</b><h3>'+esc(q.question||'(Belum diisi)')+'</h3>'+(q.imageUrl?'<img src="'+esc(q.imageUrl)+'" alt="">':'')+'<div>'+builderPreviewOptions(q)+'</div></article>';}).join('');
+ app.innerHTML='<main class="wrap exam-preview"><div class="page-title-row"><div><h1>'+esc(d.title||'Preview Ujian')+'</h1><p class="muted">'+esc(d.subject||'')+' • '+d.questions.length+' soal</p></div><button class="btn outline" id="previewBack">Kembali Edit</button></div>'+html+'</main>';el('previewBack').onclick=internalExamBuilder;
+}
+function builderPreviewOptions(q){
+ if(q.type==='multiple_choice'||q.type==='multi_select')return (q.options||[]).map(function(o){return '<div class="preview-option">○ '+esc(o||'Pilihan')+'</div>';}).join('');
+ if(q.type==='true_false')return '<div class="preview-option">○ Benar</div><div class="preview-option">○ Salah</div>';
+ return '<div class="preview-answer">'+(q.type==='essay'?'Jawaban uraian...':'Jawaban singkat...')+'</div>';
+}
+async function publishInternalExam(){
+ var d=builderReadForm();
+ if(!d.title||!d.subject)return pakkomAlert('Nama ujian dan mata pelajaran wajib diisi.');
+ if(!d.classes.length)return pakkomAlert('Pilih minimal satu kelas.');
+ if(!d.startAt||!d.endAt||new Date(d.endAt)<=new Date(d.startAt))return pakkomAlert('Jadwal ujian belum benar.');
+ if(!d.questions.length)return pakkomAlert('Tambahkan soal.');
+ for(var i=0;i<d.questions.length;i++){var q=d.questions[i];if(!q.question)return pakkomAlert('Soal '+(i+1)+' belum memiliki pertanyaan.');if((q.type==='multiple_choice'||q.type==='multi_select')&&q.options.some(function(x){return !x;}))return pakkomAlert('Pilihan jawaban soal '+(i+1)+' belum lengkap.');}
+ try{
+  var examRef=db.collection('examPublic').doc(),examId=examRef.id,batch=db.batch();
+  batch.set(examRef,{name:d.title,subject:d.subject,allowedClasses:d.classes,startAt:firebase.firestore.Timestamp.fromDate(new Date(d.startAt)),endAt:firebase.firestore.Timestamp.fromDate(new Date(d.endAt)),active:true,archived:false,examType:'internal',questionCount:d.questions.length,shuffleQuestions:d.shuffleQuestions,shuffleOptions:d.shuffleOptions,allowBack:d.allowBack,showScore:d.showScore,createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+  if(d.pin)batch.set(db.collection('examSecrets').doc(examId),{pinHash:await sha256(d.pin),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+  d.questions.forEach(function(q,index){
+   var publicRef=db.collection('internalExamQuestions').doc(examId+'__'+String(index+1).padStart(3,'0'));
+   var secretRef=db.collection('internalQuestionSecrets').doc(publicRef.id);
+   batch.set(publicRef,{examId:examId,order:index+1,type:q.type,question:q.question,imageUrl:q.imageUrl||'',points:Number(q.points)||1,required:q.required!==false,options:(q.type==='multiple_choice'||q.type==='multi_select')?(q.options||[]):[],sourceBankId:q.sourceBankId||null});
+   var sec={examId:examId,type:q.type};
+   if(q.type==='multiple_choice')sec.correctIndex=Number(q.correctIndex)||0;
+   else if(q.type==='multi_select')sec.correctIndexes=q.correctIndexes||[];
+   else if(q.type==='true_false'||q.type==='short_answer')sec.answer=q.answer||'';
+   else sec.manualGrading=true;
+   batch.set(secretRef,sec);
+  });
+  await batch.commit();clearBuilderDraft();window.__builderData=null;await pakkomAlert('Ujian internal berhasil diterbitkan.');examsAdmin();
+ }catch(e){pakkomAlert('Ujian gagal diterbitkan: '+(e.code||e.message));}
+}
+
+})();
+
