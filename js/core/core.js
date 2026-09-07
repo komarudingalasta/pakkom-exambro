@@ -1,6 +1,6 @@
 'use strict';
 window.PAKKOM_MODULES=window.PAKKOM_MODULES||[];window.PAKKOM_MODULES.push('core');
-window.PAKKOM_VERSION='20.1';
+window.PAKKOM_VERSION='20.1.4';
 var app=document.getElementById('app'),boot=document.getElementById('boot');
 var db,auth;
 var SESSION_KEY='pakkom_v12_lite_student';
@@ -110,12 +110,12 @@ function pakkomConfirm(message,title){
  });
 }
 
-var PAKKOM_BOOT_OK=true;
+window.PAKKOM_BOOT_OK=true;
 if(typeof firebase==='undefined'){
- PAKKOM_BOOT_OK=false;
+ window.PAKKOM_BOOT_OK=false;
  fatal('Firebase tidak berhasil dimuat.');
 }else if(!window.FIREBASE_CONFIG){
- PAKKOM_BOOT_OK=false;
+ window.PAKKOM_BOOT_OK=false;
  fatal('FIREBASE_CONFIG tidak ditemukan.');
 }else{
  try{
@@ -124,7 +124,7 @@ if(typeof firebase==='undefined'){
   auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
   hideBoot();
  }catch(e){
-  PAKKOM_BOOT_OK=false;
+  window.PAKKOM_BOOT_OK=false;
   fatal('Firebase gagal: '+e.message);
  }
 }

@@ -1,6 +1,6 @@
 'use strict';
 window.PAKKOM_MODULES=window.PAKKOM_MODULES||[];window.PAKKOM_MODULES.push('builder-core');
-window.PAKKOM_BUILDER_VERSION='20.1';
+window.PAKKOM_BUILDER_VERSION='20.1.4';
 var app=document.getElementById('builderApp');
 var auth=null,db=null,classes=[],step='info',timer=null;
 var draft={title:'',subject:'',classes:[],startAt:'',endAt:'',pin:'',shuffleQuestions:false,shuffleOptions:false,allowBack:true,showScore:false,questions:[]};
