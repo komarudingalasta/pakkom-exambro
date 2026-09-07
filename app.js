@@ -363,7 +363,7 @@ async function admin(){
    '<section class="card clean-card"><div class="card-headline"><div><h2>Jadwal Ujian</h2><p class="muted">Akses cepat ke jadwal yang tersedia.</p></div><button class="text-action" id="seeAllExam">Lihat semua</button></div><div class="dash-exam-list">'+upcomingHtml+'</div></section>'+
    '<section class="card clean-card admin-shortcuts"><div class="card-headline"><div><h2>Menu Admin</h2><p class="muted">Pengaturan dan riwayat.</p></div></div>'+
     '<button class="shortcut-row" id="mResult"><span>'+uiIcon('result')+'</span><span><b>Hasil Ujian</b><small>Status pengerjaan & akses ulang</small></span><span>›</span></button>'+
-    '<button class="shortcut-row" id="mScores"><span>'+uiIcon('exam')+'</span><span><b>Kelola Nilai</b><small>Input, import & publikasi nilai</small></span><span>›</span></button>'+'<button class="shortcut-row" id="mQuestions"><span>'+uiIcon('result')+'</span><span><b>Bank Soal</b><small>Buat soal & media gambar</small></span><span>›</span></button>'+
+    '<button class="shortcut-row" id="mScores"><span>'+uiIcon('exam')+'</span><span><b>Kelola Nilai</b><small>Input, import & publikasi nilai</small></span><span>›</span></button>'+'<button class="shortcut-row" id="mQuestions"><span>'+uiIcon('result')+'</span><span><b>Bank Soal</b><small>Buat soal & media gambar</small></span><span>›</span></button>'+'<button class="shortcut-row" id="mBuilder"><span>'+uiIcon('exam')+'</span><span><b>Buat Ujian Internal</b><small>Editor soal ala formulir</small></span><span>›</span></button>'+
     '<button class="shortcut-row" id="mBrand"><span>'+uiIcon('settings')+'</span><span><b>Identitas Sekolah</b><small>Nama aplikasi, sekolah & logo</small></span><span>›</span></button>'+
     '<div class="shortcut-row static"><span class="status-dot green"></span><span><b>Sinkronisasi sistem</b><small>Waktu server dan database aktif</small></span><span class="pill green">Aktif</span></div>'+
     '<div class="shortcut-row static"><span class="status-dot '+(violations?'red':'green')+'"></span><span><b>Pelanggaran tercatat</b><small>Ujian dihentikan otomatis</small></span><strong>'+violations+'</strong></div>'+
@@ -373,16 +373,16 @@ async function admin(){
  '</main>';
  top(brandName()+' — Admin',body,adminLogout,'Keluar');
  el('mClass').onclick=classesAdmin;el('mStudent').onclick=studentsAdmin;el('mExam').onclick=examsAdmin;el('mMonitor').onclick=examControlCenter;
- el('mResult').onclick=examResultsAdmin;el('mScores').onclick=scoresAdmin;el('mQuestions').onclick=questionBankAdmin;el('mBrand').onclick=brandingAdmin;el('seeAllExam').onclick=examsAdmin;
+ el('mResult').onclick=examResultsAdmin;el('mScores').onclick=scoresAdmin;el('mQuestions').onclick=questionBankAdmin;el('mBuilder').onclick=internalExamBuilder;el('mBrand').onclick=brandingAdmin;el('seeAllExam').onclick=examsAdmin;
  document.querySelectorAll('[data-exam-open]').forEach(function(b){b.onclick=examsAdmin;});
  if(el('adminQuickMenu'))el('adminQuickMenu').onclick=openAdminQuickMenu;
 }
 function openAdminQuickMenu(){
- var d=document.createElement('div');d.className='mobile-sheet-backdrop';d.innerHTML='<div class="mobile-sheet admin-nav-sheet"><div class="sheet-handle"></div><div class="sheet-title-row"><div><h2>Menu Admin</h2><p class="muted">Pilih menu pengelolaan.</p></div><button class="sheet-close" aria-label="Tutup">×</button></div><button data-go="class">'+uiIcon('classes')+'<span><b>Kelas</b><small>Data dan password kelas</small></span><span>›</span></button><button data-go="student">'+uiIcon('students')+'<span><b>Siswa</b><small>Akun, import, approval</small></span><span>›</span></button><button data-go="exam">'+uiIcon('exam')+'<span><b>Ujian</b><small>Jadwal dan pengaturan</small></span><span>›</span></button><button data-go="monitor">'+uiIcon('monitor')+'<span><b>Control Center</b><small>Monitoring real-time</small></span><span>›</span></button><button data-go="result">'+uiIcon('result')+'<span><b>Hasil Ujian</b><small>Riwayat pengerjaan</small></span><span>›</span></button><button data-go="scores">'+uiIcon('exam')+'<span><b>Kelola Nilai</b><small>Input, import & publikasi</small></span><span>›</span></button><button data-go="questions">'+uiIcon('result')+'<span><b>Bank Soal</b><small>Buat soal & gambar</small></span><span>›</span></button><button data-go="brand">'+uiIcon('settings')+'<span><b>Identitas</b><small>Logo dan nama sekolah</small></span><span>›</span></button><button class="sheet-logout" data-go="logout">Keluar</button></div>';
+ var d=document.createElement('div');d.className='mobile-sheet-backdrop';d.innerHTML='<div class="mobile-sheet admin-nav-sheet"><div class="sheet-handle"></div><div class="sheet-title-row"><div><h2>Menu Admin</h2><p class="muted">Pilih menu pengelolaan.</p></div><button class="sheet-close" aria-label="Tutup">×</button></div><button data-go="class">'+uiIcon('classes')+'<span><b>Kelas</b><small>Data dan password kelas</small></span><span>›</span></button><button data-go="student">'+uiIcon('students')+'<span><b>Siswa</b><small>Akun, import, approval</small></span><span>›</span></button><button data-go="exam">'+uiIcon('exam')+'<span><b>Ujian</b><small>Jadwal dan pengaturan</small></span><span>›</span></button><button data-go="monitor">'+uiIcon('monitor')+'<span><b>Control Center</b><small>Monitoring real-time</small></span><span>›</span></button><button data-go="result">'+uiIcon('result')+'<span><b>Hasil Ujian</b><small>Riwayat pengerjaan</small></span><span>›</span></button><button data-go="scores">'+uiIcon('exam')+'<span><b>Kelola Nilai</b><small>Input, import & publikasi</small></span><span>›</span></button><button data-go="questions">'+uiIcon('result')+'<span><b>Bank Soal</b><small>Buat soal & gambar</small></span><span>›</span></button><button data-go="builder">'+uiIcon('exam')+'<span><b>Buat Ujian Internal</b><small>Susun & terbitkan soal</small></span><span>›</span></button><button data-go="brand">'+uiIcon('settings')+'<span><b>Identitas</b><small>Logo dan nama sekolah</small></span><span>›</span></button><button class="sheet-logout" data-go="logout">Keluar</button></div>';
  document.body.appendChild(d);
  function close(){d.remove();}
  d.onclick=function(e){if(e.target===d)close();};d.querySelector('.sheet-close').onclick=close;
- var go={class:classesAdmin,student:studentsAdmin,exam:examsAdmin,monitor:examControlCenter,result:examResultsAdmin,scores:scoresAdmin,questions:questionBankAdmin,brand:brandingAdmin,logout:adminLogout};
+ var go={class:classesAdmin,student:studentsAdmin,exam:examsAdmin,monitor:examControlCenter,result:examResultsAdmin,scores:scoresAdmin,questions:questionBankAdmin,builder:internalExamBuilder,brand:brandingAdmin,logout:adminLogout};
  d.querySelectorAll('[data-go]').forEach(function(b){b.onclick=function(){var fn=go[b.dataset.go];close();if(fn)fn();};});
 }
 async function adminLogout(){clearSession();try{await auth.signOut();await ensureAnon();}catch(e){}renderHome('');}
@@ -769,6 +769,143 @@ async function saveQuestion(){
  try{if(id)await db.collection('questionBank').doc(id).set(data,{merge:true});else{data.createdAt=firebase.firestore.FieldValue.serverTimestamp();await db.collection('questionBank').add(data);}questionBankAdmin();}catch(e){pakkomAlert('Soal gagal disimpan: '+(e.code||e.message));}
 }
 async function deleteQuestion(id){if(!confirm('Hapus soal ini dari Bank Soal?'))return;try{await db.collection('questionBank').doc(id).delete();questionBankAdmin();}catch(e){pakkomAlert('Soal gagal dihapus: '+(e.code||e.message));}}
+
+
+/* ======================================================================
+   V19 — PakKom Exam Builder
+   Editor ala Google Forms + Bank Soal + Internal Exam
+   ====================================================================== */
+var BUILDER_DRAFT_KEY='pakkom_v19_builder_draft';
+
+function newBuilderQuestion(type){
+ return {id:'q_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),type:type||'multiple_choice',question:'',imageUrl:'',points:1,options:['','','',''],correctIndex:0,answer:'',required:true};
+}
+function builderDraft(){
+ try{
+  var x=JSON.parse(sessionStorage.getItem(BUILDER_DRAFT_KEY)||'null');
+  if(x&&Array.isArray(x.questions))return x;
+ }catch(e){}
+ return {title:'',subject:'',classes:[],startAt:'',endAt:'',pin:'',shuffleQuestions:false,shuffleOptions:false,allowBack:true,showScore:false,questions:[newBuilderQuestion()]};
+}
+function saveBuilderDraft(d){sessionStorage.setItem(BUILDER_DRAFT_KEY,JSON.stringify(d));}
+function clearBuilderDraft(){sessionStorage.removeItem(BUILDER_DRAFT_KEY);}
+function builderReadForm(){
+ var d=window.__builderData||builderDraft();
+ d.title=el('ibTitle')?el('ibTitle').value.trim():d.title;
+ d.subject=el('ibSubject')?el('ibSubject').value.trim():d.subject;
+ d.startAt=el('ibStart')?el('ibStart').value:d.startAt;
+ d.endAt=el('ibEnd')?el('ibEnd').value:d.endAt;
+ d.pin=el('ibPin')?el('ibPin').value.trim():d.pin;
+ d.shuffleQuestions=!!(el('ibShuffleQ')&&el('ibShuffleQ').checked);
+ d.shuffleOptions=!!(el('ibShuffleO')&&el('ibShuffleO').checked);
+ d.allowBack=!!(el('ibAllowBack')&&el('ibAllowBack').checked);
+ d.showScore=!!(el('ibShowScore')&&el('ibShowScore').checked);
+ d.classes=[].slice.call(document.querySelectorAll('.ib-class:checked')).map(function(x){return x.value;});
+ document.querySelectorAll('.builder-question').forEach(function(card){
+  var q=d.questions.find(function(x){return x.id===card.dataset.qid;});if(!q)return;
+  q.question=card.querySelector('.bq-text').value.trim();
+  q.imageUrl=card.querySelector('.bq-image').value.trim();
+  q.points=Number(card.querySelector('.bq-points').value)||1;
+  q.required=card.querySelector('.bq-required').checked;
+  if(q.type==='multiple_choice'||q.type==='multi_select'){
+   q.options=[].slice.call(card.querySelectorAll('.bq-option')).map(function(x){return x.value.trim();});
+   var checked=[].slice.call(card.querySelectorAll('.bq-correct:checked')).map(function(x){return Number(x.value);});
+   if(q.type==='multiple_choice')q.correctIndex=checked.length?checked[0]:0;else q.correctIndexes=checked;
+  }else if(q.type==='true_false'){var a=card.querySelector('.bq-tf');q.answer=a?a.value:'true';}
+  else if(q.type==='short_answer'){var sa=card.querySelector('.bq-answer');q.answer=sa?sa.value.trim():'';}
+ });
+ saveBuilderDraft(d);return d;
+}
+function builderAnswerEditor(q){
+ if(q.type==='multiple_choice'||q.type==='multi_select'){
+  var inputType=q.type==='multiple_choice'?'radio':'checkbox',name='correct_'+q.id;
+  return '<div class="builder-options">'+(q.options||['','','','']).map(function(o,i){
+   var checked=q.type==='multiple_choice'?Number(q.correctIndex)===i:(q.correctIndexes||[]).indexOf(i)>=0;
+   return '<div class="builder-option"><input class="bq-correct" type="'+inputType+'" name="'+name+'" value="'+i+'" '+(checked?'checked':'')+'><span>'+String.fromCharCode(65+i)+'</span><input class="input bq-option" value="'+esc(o)+'" placeholder="Pilihan '+String.fromCharCode(65+i)+'"></div>';
+  }).join('')+'<button class="link-btn bq-add-option" type="button">+ Tambah pilihan</button></div>';
+ }
+ if(q.type==='true_false')return '<div class="field"><label>Kunci jawaban</label><select class="input bq-tf"><option value="true" '+(q.answer==='true'?'selected':'')+'>Benar</option><option value="false" '+(q.answer==='false'?'selected':'')+'>Salah</option></select></div>';
+ if(q.type==='short_answer')return '<div class="field"><label>Kunci jawaban</label><input class="input bq-answer" value="'+esc(q.answer||'')+'" placeholder="Jawaban singkat"></div>';
+ return '<div class="notice">Uraian akan masuk ke daftar koreksi manual.</div>';
+}
+function builderQuestionCard(q,i){
+ return '<article class="card builder-question" data-qid="'+esc(q.id)+'"><div class="builder-q-head"><span class="q-number">Soal '+(i+1)+'</span><select class="input bq-type"><option value="multiple_choice">Pilihan Ganda</option><option value="multi_select">Multi Jawaban</option><option value="true_false">Benar / Salah</option><option value="short_answer">Isian Singkat</option><option value="essay">Uraian</option></select></div>'+
+ '<textarea class="input bq-text" placeholder="Tuliskan pertanyaan...">'+esc(q.question||'')+'</textarea>'+
+ '<div class="builder-media-row"><input class="input bq-image" value="'+esc(q.imageUrl||'')+'" placeholder="URL gambar soal (opsional)"><button class="btn outline small bq-media" type="button">🖼 Media</button></div>'+
+ (q.imageUrl?'<div class="builder-image"><img src="'+esc(q.imageUrl)+'" alt=""></div>':'')+
+ '<div class="bq-answer-area">'+builderAnswerEditor(q)+'</div>'+
+ '<div class="builder-q-footer"><label>Bobot <input class="input bq-points" type="number" min="0.1" step="0.1" value="'+esc(q.points||1)+'"></label><label class="checkline"><input class="bq-required" type="checkbox" '+(q.required!==false?'checked':'')+'> Wajib</label><div class="grow"></div><button class="icon-btn bq-duplicate" title="Duplikat">⧉</button><button class="icon-btn bq-up" title="Naik">↑</button><button class="icon-btn bq-down" title="Turun">↓</button><button class="icon-btn danger bq-delete" title="Hapus">🗑</button></div></article>';
+}
+async function internalExamBuilder(){
+ if(!(await isAdmin()))return adminLogin();
+ var classes=(await db.collection('classes').get()).docs.map(function(d){return Object.assign({id:d.id},d.data());}).filter(function(x){return x.active!==false;});
+ var d=builderDraft();window.__builderData=d;
+ var body='<main class="wrap exam-builder"><div class="page-title-row"><div><h1>Buat Ujian Internal</h1><p class="muted">Susun soal seperti formulir, lalu terbitkan langsung ke PakKom Exambro.</p></div><button class="btn outline" id="ibPreview">Preview</button></div>'+
+ '<section class="card builder-header"><div class="form-grid-2"><div class="field"><label>Nama Ujian</label><input id="ibTitle" class="input" value="'+esc(d.title)+'" placeholder="Penilaian Harian Matematika"></div><div class="field"><label>Mata Pelajaran</label><input id="ibSubject" class="input" value="'+esc(d.subject)+'" placeholder="Matematika"></div></div><div class="field"><label>Kelas Peserta</label><div class="class-chip-grid">'+classes.map(function(c){return '<label class="class-chip"><input class="ib-class" type="checkbox" value="'+esc(c.id)+'" '+(d.classes.indexOf(c.id)>=0?'checked':'')+'><span>'+esc(c.name||c.id)+'</span></label>';}).join('')+'</div></div><div class="form-grid-3"><div class="field"><label>Mulai</label><input id="ibStart" class="input" type="datetime-local" value="'+esc(d.startAt)+'"></div><div class="field"><label>Selesai</label><input id="ibEnd" class="input" type="datetime-local" value="'+esc(d.endAt)+'"></div><div class="field"><label>PIN</label><input id="ibPin" class="input" value="'+esc(d.pin)+'" placeholder="Opsional"></div></div><div class="builder-settings"><label><input id="ibShuffleQ" type="checkbox" '+(d.shuffleQuestions?'checked':'')+'> Acak soal</label><label><input id="ibShuffleO" type="checkbox" '+(d.shuffleOptions?'checked':'')+'> Acak pilihan</label><label><input id="ibAllowBack" type="checkbox" '+(d.allowBack?'checked':'')+'> Boleh kembali</label><label><input id="ibShowScore" type="checkbox" '+(d.showScore?'checked':'')+'> Tampilkan nilai setelah selesai</label></div></section>'+
+ '<div id="builderQuestions">'+d.questions.map(builderQuestionCard).join('')+'</div>'+
+ '<div class="builder-addbar"><button class="btn outline" id="ibAddQuestion">+ Buat Soal Baru</button><button class="btn outline" id="ibFromBank">📚 Ambil dari Bank Soal</button><button class="btn green" id="ibPublish">Terbitkan Ujian</button></div></main>';
+ top('Buat Ujian Internal',body,admin,'Dashboard');
+ bindBuilder();
+}
+function bindBuilder(){
+ var d=window.__builderData;
+ document.querySelectorAll('.builder-question').forEach(function(card){
+  var id=card.dataset.qid,q=d.questions.find(function(x){return x.id===id;});
+  card.querySelector('.bq-type').value=q.type;
+  card.querySelector('.bq-type').onchange=function(){builderReadForm();q.type=this.value;if(q.type==='multiple_choice'||q.type==='multi_select')q.options=q.options&&q.options.length?q.options:['','','',''];saveBuilderDraft(d);internalExamBuilder();};
+  var add=card.querySelector('.bq-add-option');if(add)add.onclick=function(){builderReadForm();q.options.push('');saveBuilderDraft(d);internalExamBuilder();};
+  card.querySelector('.bq-delete').onclick=function(){builderReadForm();if(d.questions.length<=1)return pakkomAlert('Ujian minimal memiliki satu soal.');d.questions=d.questions.filter(function(x){return x.id!==id;});saveBuilderDraft(d);internalExamBuilder();};
+  card.querySelector('.bq-duplicate').onclick=function(){builderReadForm();var copy=JSON.parse(JSON.stringify(q));copy.id='q_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);var at=d.questions.findIndex(function(x){return x.id===id;});d.questions.splice(at+1,0,copy);saveBuilderDraft(d);internalExamBuilder();};
+  card.querySelector('.bq-up').onclick=function(){builderReadForm();var at=d.questions.findIndex(function(x){return x.id===id;});if(at>0){var t=d.questions[at-1];d.questions[at-1]=d.questions[at];d.questions[at]=t;}saveBuilderDraft(d);internalExamBuilder();};
+  card.querySelector('.bq-down').onclick=function(){builderReadForm();var at=d.questions.findIndex(function(x){return x.id===id;});if(at<d.questions.length-1){var t=d.questions[at+1];d.questions[at+1]=d.questions[at];d.questions[at]=t;}saveBuilderDraft(d);internalExamBuilder();};
+  card.querySelector('.bq-media').onclick=function(){builderReadForm();questionBankAdmin();};
+ });
+ el('ibAddQuestion').onclick=function(){builderReadForm();d.questions.push(newBuilderQuestion());saveBuilderDraft(d);internalExamBuilder();};
+ el('ibFromBank').onclick=builderPickFromBank;
+ el('ibPreview').onclick=function(){builderReadForm();builderPreview(d);};
+ el('ibPublish').onclick=publishInternalExam;
+ document.querySelectorAll('#ibTitle,#ibSubject,#ibStart,#ibEnd,#ibPin,.ib-class,#ibShuffleQ,#ibShuffleO,#ibAllowBack,#ibShowScore').forEach(function(x){x.onchange=function(){builderReadForm();};});
+}
+async function builderPickFromBank(){
+ builderReadForm();var d=window.__builderData,q=(await db.collection('questionBank').get()).docs.map(function(x){return Object.assign({bankId:x.id},x.data());});
+ var items=q.map(function(x,i){return '<label class="bank-pick"><input type="checkbox" value="'+i+'"><span><b>'+esc(x.question||'Soal')+'</b><small>'+esc(x.subject||'')+' • '+esc(questionTypeLabel(x.type))+'</small></span></label>';}).join('')||'<div class="empty">Bank soal masih kosong.</div>';
+ app.innerHTML='<main class="wrap"><div class="page-title-row"><div><h1>Ambil dari Bank Soal</h1><p class="muted">Pilih satu atau beberapa soal.</p></div><button class="btn outline" id="bankBack">Kembali</button></div><section class="card"><div class="bank-pick-list">'+items+'</div><button class="btn green block" id="bankAdd">Tambahkan ke Ujian</button></section></main>';
+ el('bankBack').onclick=internalExamBuilder;el('bankAdd').onclick=function(){[].slice.call(document.querySelectorAll('.bank-pick input:checked')).forEach(function(c){var b=q[Number(c.value)],n=newBuilderQuestion(b.type);Object.assign(n,{question:b.question||'',imageUrl:b.imageUrl||'',points:Number(b.points)||1,options:(b.options||['','','','']).slice(),correctIndex:Number(b.correctIndex)||0,correctIndexes:(b.correctIndexes||[]).slice(),answer:b.answer||'',sourceBankId:b.bankId});d.questions.push(n);});saveBuilderDraft(d);internalExamBuilder();};
+}
+function builderPreview(d){
+ var html=d.questions.map(function(q,i){return '<article class="card preview-q"><b>Soal '+(i+1)+' • '+esc(q.points||1)+' poin</b><h3>'+esc(q.question||'(Belum diisi)')+'</h3>'+(q.imageUrl?'<img src="'+esc(q.imageUrl)+'" alt="">':'')+'<div>'+builderPreviewOptions(q)+'</div></article>';}).join('');
+ app.innerHTML='<main class="wrap exam-preview"><div class="page-title-row"><div><h1>'+esc(d.title||'Preview Ujian')+'</h1><p class="muted">'+esc(d.subject||'')+' • '+d.questions.length+' soal</p></div><button class="btn outline" id="previewBack">Kembali Edit</button></div>'+html+'</main>';el('previewBack').onclick=internalExamBuilder;
+}
+function builderPreviewOptions(q){
+ if(q.type==='multiple_choice'||q.type==='multi_select')return (q.options||[]).map(function(o){return '<div class="preview-option">○ '+esc(o||'Pilihan')+'</div>';}).join('');
+ if(q.type==='true_false')return '<div class="preview-option">○ Benar</div><div class="preview-option">○ Salah</div>';
+ return '<div class="preview-answer">'+(q.type==='essay'?'Jawaban uraian...':'Jawaban singkat...')+'</div>';
+}
+async function publishInternalExam(){
+ var d=builderReadForm();
+ if(!d.title||!d.subject)return pakkomAlert('Nama ujian dan mata pelajaran wajib diisi.');
+ if(!d.classes.length)return pakkomAlert('Pilih minimal satu kelas.');
+ if(!d.startAt||!d.endAt||new Date(d.endAt)<=new Date(d.startAt))return pakkomAlert('Jadwal ujian belum benar.');
+ if(!d.questions.length)return pakkomAlert('Tambahkan soal.');
+ for(var i=0;i<d.questions.length;i++){var q=d.questions[i];if(!q.question)return pakkomAlert('Soal '+(i+1)+' belum memiliki pertanyaan.');if((q.type==='multiple_choice'||q.type==='multi_select')&&q.options.some(function(x){return !x;}))return pakkomAlert('Pilihan jawaban soal '+(i+1)+' belum lengkap.');}
+ try{
+  var examRef=db.collection('examPublic').doc(),examId=examRef.id,batch=db.batch();
+  batch.set(examRef,{name:d.title,subject:d.subject,allowedClasses:d.classes,startAt:firebase.firestore.Timestamp.fromDate(new Date(d.startAt)),endAt:firebase.firestore.Timestamp.fromDate(new Date(d.endAt)),active:true,archived:false,examType:'internal',questionCount:d.questions.length,shuffleQuestions:d.shuffleQuestions,shuffleOptions:d.shuffleOptions,allowBack:d.allowBack,showScore:d.showScore,createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+  if(d.pin)batch.set(db.collection('examSecrets').doc(examId),{pinHash:await sha256(d.pin),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+  d.questions.forEach(function(q,index){
+   var publicRef=db.collection('internalExamQuestions').doc(examId+'__'+String(index+1).padStart(3,'0'));
+   var secretRef=db.collection('internalQuestionSecrets').doc(publicRef.id);
+   batch.set(publicRef,{examId:examId,order:index+1,type:q.type,question:q.question,imageUrl:q.imageUrl||'',points:Number(q.points)||1,required:q.required!==false,options:(q.type==='multiple_choice'||q.type==='multi_select')?(q.options||[]):[],sourceBankId:q.sourceBankId||null});
+   var sec={examId:examId,type:q.type};
+   if(q.type==='multiple_choice')sec.correctIndex=Number(q.correctIndex)||0;
+   else if(q.type==='multi_select')sec.correctIndexes=q.correctIndexes||[];
+   else if(q.type==='true_false'||q.type==='short_answer')sec.answer=q.answer||'';
+   else sec.manualGrading=true;
+   batch.set(secretRef,sec);
+  });
+  await batch.commit();clearBuilderDraft();window.__builderData=null;await pakkomAlert('Ujian internal berhasil diterbitkan.');examsAdmin();
+ }catch(e){pakkomAlert('Ujian gagal diterbitkan: '+(e.code||e.message));}
+}
 
 })();
 
