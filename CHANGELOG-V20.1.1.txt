@@ -1,0 +1,10 @@
+PakKom Exambro V20.1.1
+
+Perbaikan:
+- Memulihkan Firestore rules untuk internalExamQuestions.
+- Memulihkan Firestore rules untuk internalQuestionSecrets.
+- Mencegah permission-denied saat publish ujian internal.
+- Tidak mengubah UI, modul, atau alur fitur lain dari V20.1.
+
+Penting:
+- Gunakan firestore-v20.1.1.rules / firestore.rules dari paket ini.
