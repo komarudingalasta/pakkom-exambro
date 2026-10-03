@@ -1,5 +1,19 @@
 (function(){
 'use strict';
+
+// V20.1 Flexible Exam Settings.
+// Default ujian lama: dibatasi 2 kali.
+var v201ActiveSecurity={exitPolicy:'limited',maxExitCount:2,logExitActivity:true};
+function v201SecurityOf(exam){
+  var s=(exam&&exam.security)||{};
+  return {exitPolicy:s.exitPolicy||'limited',maxExitCount:Number(s.maxExitCount||2),logExitActivity:s.logExitActivity!==false};
+}
+function v201SetActiveSecurity(exam){v201ActiveSecurity=v201SecurityOf(exam);}
+function v201ShouldLock(count){
+  if(v201ActiveSecurity.exitPolicy==='allowed')return false;
+  if(v201ActiveSecurity.exitPolicy==='blocked')return count>=1;
+  return count>=Math.max(1,Number(v201ActiveSecurity.maxExitCount||2));
+}
 var app=document.getElementById('app'),boot=document.getElementById('boot');
 var db,auth;
 var SESSION_KEY='pakkom_v12_lite_student';
