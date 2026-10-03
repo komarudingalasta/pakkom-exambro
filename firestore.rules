@@ -116,7 +116,7 @@ service cloud.firestore {
           && request.resource.data.examId == resource.data.examId
           && request.resource.data.autoCompleted == true
           && request.resource.data.completionReason == "left_exam_twice"
-          && request.resource.data.violationCount >= 2
+          && request.resource.data.violationCount >= 1
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly([
               'status',
